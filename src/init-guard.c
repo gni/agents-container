@@ -53,6 +53,8 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
         exe_path[len] = '\0';
         
         int allowed = 0;
+        char *base = strrchr(exe_path, '/');
+        char *exe_name = base ? base + 1 : exe_path;
         if (strcmp(exe_path, "/usr/bin/git") == 0 ||
             strcmp(exe_path, "/usr/local/bin/git") == 0 ||
             strstr(exe_path, "/git-core/git") != NULL ||
@@ -65,7 +67,12 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
             strcmp(exe_path, "/usr/bin/gh-original") == 0 ||
             strcmp(exe_path, "/usr/local/bin/vault-wrapper") == 0 ||
             strcmp(exe_path, "/usr/bin/node") == 0 ||
-            strcmp(exe_path, "/usr/local/bin/node") == 0) {
+            strcmp(exe_path, "/usr/local/bin/node") == 0 ||
+            strncmp(exe_name, "python", 6) == 0 ||
+            strncmp(exe_name, "ruby", 4) == 0 ||
+            strncmp(exe_name, "perl", 4) == 0 ||
+            strncmp(exe_name, "php", 3) == 0 ||
+            strncmp(exe_name, "java", 4) == 0) {
             allowed = 1;
         }
         
@@ -91,7 +98,9 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
                     cmdline[n] = '\0';
                     for (size_t i = 0; i < n; i++) {
                         char c = cmdline[i];
-                        if (c == ',' || c == '<' || c == '>' || c == '|' || c == '&' || c == ';') {
+                        // Block command chaining, redirection, piping, backticks, subshells, newlines
+                        if (c == ',' || c == '<' || c == '>' || c == '|' || c == '&' || c == ';' ||
+                            c == '`' || c == '$' || c == '(' || c == ')' || c == '\n' || c == '\r') {
                             return 0;
                         }
                     }

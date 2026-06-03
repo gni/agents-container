@@ -24,8 +24,9 @@ COPY docker/daemon.json /etc/docker/daemon.json
 WORKDIR /app
 COPY . .
 
-# Ensure scripts are executable
-RUN chmod +x /app/docker/entrypoint-dind.sh /app/tests/*.sh /app/tests/*.py /app/tests/*.js
+# Ensure scripts are executable if they exist
+RUN chmod +x /app/docker/entrypoint-dind.sh && \
+    if [ -d /app/tests ]; then chmod +x /app/tests/*.sh /app/tests/*.py /app/tests/*.js 2>/dev/null || true; fi
 
 # Set the entrypoint to bootstrap our isolated environment
 ENTRYPOINT ["/app/docker/entrypoint-dind.sh"]

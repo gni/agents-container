@@ -64,17 +64,25 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
         LEGIT_GIT_OP=0
         ROOT_GIT_PID=""
         
+
         while [ "$CUR_PID" -gt 1 ]; do
             P_EXE=$(readlink -f /proc/$CUR_PID/exe 2>/dev/null || true)
             P_CMD=$(cat /proc/$CUR_PID/cmdline 2>/dev/null | tr '\0' ' ')
             
-            if [[ "$P_EXE" != "/usr/bin/git" && "$P_EXE" != */git-core/git* && "$P_EXE" != "/usr/local/bin/git" && "$P_EXE" != "/usr/bin/bash" && "$P_EXE" != "/bin/bash" && "$P_EXE" != "/usr/bin/sh" && "$P_EXE" != "/bin/sh" && "$P_EXE" != "/usr/bin/dash" && "$P_EXE" != "/bin/dash" && "$P_EXE" != "/usr/bin/gh-original" && "$P_EXE" != "/usr/local/bin/vault-wrapper" && "$P_EXE" != "/usr/bin/node" && "$P_EXE" != "/usr/local/bin/node" ]]; then
+            P_EXE_BASE=$(basename "$P_EXE" 2>/dev/null || echo "")
+            if [[ "$P_EXE" != "/usr/bin/git" && "$P_EXE" != */git-core/git* && "$P_EXE" != "/usr/local/bin/git" && \
+                  "$P_EXE" != "/usr/bin/bash" && "$P_EXE" != "/bin/bash" && \
+                  "$P_EXE" != "/usr/bin/sh" && "$P_EXE" != "/bin/sh" && \
+                  "$P_EXE" != "/usr/bin/dash" && "$P_EXE" != "/bin/dash" && \
+                  "$P_EXE" != "/usr/bin/gh-original" && "$P_EXE" != "/usr/local/bin/vault-wrapper" && \
+                  "$P_EXE" != "/usr/bin/node" && "$P_EXE" != "/usr/local/bin/node" && \
+                  "$P_EXE_BASE" != python* && "$P_EXE_BASE" != ruby* && "$P_EXE_BASE" != perl* && "$P_EXE_BASE" != php* && "$P_EXE_BASE" != java* ]]; then
                 echo "[SYSTEM BLOCK] Malicious executable detected in credential delegation chain: $P_EXE" >&2
                 exit 1
             fi
 
             if [[ "$P_EXE" == "/usr/bin/bash" || "$P_EXE" == "/bin/bash" || "$P_EXE" == "/usr/bin/sh" || "$P_EXE" == "/bin/sh" || "$P_EXE" == "/usr/bin/dash" || "$P_EXE" == "/bin/dash" ]]; then
-                if [[ "$P_CMD" =~ [\,\<\>\|\&\;] ]]; then
+                if [[ "$P_CMD" =~ [\,\<\>\|\&\;\`\$\(\)] ]] || [[ "$P_CMD" == *$'\n'* ]] || [[ "$P_CMD" == *$'\r'* ]]; then
                     echo "[SYSTEM BLOCK] Shell metacharacter injection detected in credential chain" >&2
                     exit 1
                 fi

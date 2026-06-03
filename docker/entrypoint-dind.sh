@@ -58,6 +58,13 @@ if [ ! -f /app/config/ca.crt ]; then
     openssl x509 -req -in /app/config/client.csr -CA /app/config/ca.crt -CAkey /app/config/ca.key -CAcreateserial -out /app/config/client.crt -days 365 -sha256 -extfile "$CLI_EXT_FILE"
 
     rm -f "$SRV_EXT_FILE" "$CLI_EXT_FILE"
+
+    # Secure the private keys with correct file permissions
+    chmod 600 /app/config/ca.key /app/config/server.key /app/config/client.key 2>/dev/null || true
+    chmod 644 /app/config/ca.crt /app/config/server.crt /app/config/client.crt 2>/dev/null || true
+
+    # Fix ownership of config certificates so host user can access them
+    chown -R $(stat -c "%u:%g" /app) /app/config/ca.key /app/config/ca.crt /app/config/server.key /app/config/server.crt /app/config/client.key /app/config/client.crt /app/config/ca.srl 2>/dev/null || true
 fi
 
 if [ ! -f /app/config/resolv.conf ]; then

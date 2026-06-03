@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help dind-start build clean-instance clean-all setup-global setup-agent setup-instance run shell
+.PHONY: help dind-start build clean-instance clean-all destroy-all setup-global setup-agent setup-instance run shell
 
 # Dynamically load and export all variables from .env if it exists
 -include .env
@@ -28,7 +28,8 @@ help:
 	@printf "  run             Execute the agent instance in headless mode behind gVisor in DinD.\n"
 	@printf "  shell           Execute the agent instance with an interactive shell behind gVisor in DinD.\n"
 	@printf "  clean-instance  Destroy a specific instance and wipe its cryptographic material.\n"
-	@printf "  clean-all       Nuclear teardown of all instances, outer and nested containers.\n\n"
+	@printf "  clean-all       Wipe all agent credentials from running instances (retaining workspaces).\n"
+	@printf "  destroy-all     Nuclear teardown of all containers, volumes, and ALL workspaces.\n\n"
 	@printf "Environment Overrides:\n"
 	@printf "  AGENT_TYPE        The agent blueprint to build/run (Default: pi)\n"
 	@printf "  INSTANCE_NAME     The unique ID for the container and vault (Default: pi_[RANDOM_ID])\n"
@@ -124,9 +125,15 @@ clean-instance:
 	@echo "[CLEAN] Destroying nested agent instance: $(INSTANCE_NAME)"
 	@docker exec isolation-dind-host docker rm -f agent_instance_$(INSTANCE_NAME) 2>/dev/null || true
 	@rm -rf instances/$(INSTANCE_NAME)/.secrets
-
 clean-all:
-	@echo "[CLEAN] Teardown of all nested containers and physical outer DinD container"
+	@echo "[CLEAN] Teardown of all nested containers and wiping ALL credentials (retaining workspaces)..."
+	@docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
+	docker compose down -v 2>/dev/null || true
+	rm -rf instances/*/.secrets 2>/dev/null || true
+	rm -f instances/*/.env 2>/dev/null || true
+
+destroy-all:
+	@echo "[DESTROY] Nuclear teardown of all containers, volumes, and ALL workspaces..."
 	@docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
 	docker compose down -v 2>/dev/null || true
 	rm -rf instances/*

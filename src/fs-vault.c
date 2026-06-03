@@ -9,17 +9,42 @@
 #include <sys/syscall.h>
 
 static int (*real_open)(const char *, int, ...) = NULL;
+static int (*real_openat)(int, const char *, int, ...) = NULL;
+static FILE *(*real_fopen)(const char *, const char *) = NULL;
+static FILE *(*real_fopen64)(const char *, const char *) = NULL;
+static int (*real_open64)(const char *, int, ...) = NULL;
+static int (*real_openat64)(int, const char *, int, ...) = NULL;
+static int (*real_execve)(const char *, char *const [], char *const []) = NULL;
+static long (*real_syscall)(long, ...) = NULL;
 
 static void init_hooks() {
-    if (!real_open) {
-        real_open = dlsym(RTLD_NEXT, "open");
-    }
+    if (!real_open) real_open = dlsym(RTLD_NEXT, "open");
+    if (!real_openat) real_openat = dlsym(RTLD_NEXT, "openat");
+    if (!real_fopen) real_fopen = dlsym(RTLD_NEXT, "fopen");
+    if (!real_fopen64) real_fopen64 = dlsym(RTLD_NEXT, "fopen64");
+    if (!real_open64) real_open64 = dlsym(RTLD_NEXT, "open64");
+    if (!real_openat64) real_openat64 = dlsym(RTLD_NEXT, "openat64");
+    if (!real_execve) real_execve = dlsym(RTLD_NEXT, "execve");
+    if (!real_syscall) real_syscall = dlsym(RTLD_NEXT, "syscall");
 }
 
 int is_blocked(const char *pathname) {
     if (!pathname) return 0;
     
-    if (strstr(pathname, "/run/secrets/") != NULL || strstr(pathname, "/vault/") != NULL || strstr(pathname, ".secrets") != NULL || strstr(pathname, "auth.json") != NULL) {
+    // Harden path checks to block relative paths and directory boundary bypasses
+    int match = 0;
+    if (strstr(pathname, "/run/secrets") != NULL ||
+        strcmp(pathname, "run/secrets") == 0 ||
+        strncmp(pathname, "run/secrets/", 12) == 0 ||
+        strstr(pathname, "/vault") != NULL ||
+        strcmp(pathname, "vault") == 0 ||
+        strncmp(pathname, "vault/", 6) == 0 ||
+        strstr(pathname, ".secrets") != NULL ||
+        strstr(pathname, "auth.json") != NULL) {
+        match = 1;
+    }
+    
+    if (match) {
         if (geteuid() == 0) return 0;
         if (strstr(pathname, "auth.json") != NULL && getpid() == 1) {
             return 0;
@@ -50,15 +75,15 @@ int openat(int dirfd, const char *pathname, int flags, ...) {
         errno = EACCES;
         return -1;
     }
-    int (*orig)(int, const char*, int, ...) = dlsym(RTLD_NEXT, "openat");
+    init_hooks();
     if (flags & O_CREAT) {
         va_list args;
         va_start(args, flags);
         mode_t mode = va_arg(args, mode_t);
         va_end(args);
-        return orig(dirfd, pathname, flags, mode);
+        return real_openat(dirfd, pathname, flags, mode);
     }
-    return orig(dirfd, pathname, flags);
+    return real_openat(dirfd, pathname, flags);
 }
 
 FILE *fopen(const char *pathname, const char *mode) {
@@ -66,8 +91,8 @@ FILE *fopen(const char *pathname, const char *mode) {
         errno = EACCES;
         return NULL;
     }
-    FILE* (*orig)(const char*, const char*) = dlsym(RTLD_NEXT, "fopen");
-    return orig(pathname, mode);
+    init_hooks();
+    return real_fopen(pathname, mode);
 }
 
 FILE *fopen64(const char *pathname, const char *mode) {
@@ -75,8 +100,8 @@ FILE *fopen64(const char *pathname, const char *mode) {
         errno = EACCES;
         return NULL;
     }
-    FILE* (*orig)(const char*, const char*) = dlsym(RTLD_NEXT, "fopen64");
-    return orig(pathname, mode);
+    init_hooks();
+    return real_fopen64(pathname, mode);
 }
 
 int open64(const char *pathname, int flags, ...) {
@@ -84,15 +109,15 @@ int open64(const char *pathname, int flags, ...) {
         errno = EACCES;
         return -1;
     }
-    int (*orig)(const char*, int, ...) = dlsym(RTLD_NEXT, "open64");
+    init_hooks();
     if (flags & O_CREAT) {
         va_list args;
         va_start(args, flags);
         mode_t mode = va_arg(args, mode_t);
         va_end(args);
-        return orig(pathname, flags, mode);
+        return real_open64(pathname, flags, mode);
     }
-    return orig(pathname, flags);
+    return real_open64(pathname, flags);
 }
 
 int openat64(int dirfd, const char *pathname, int flags, ...) {
@@ -100,15 +125,15 @@ int openat64(int dirfd, const char *pathname, int flags, ...) {
         errno = EACCES;
         return -1;
     }
-    int (*orig)(int, const char*, int, ...) = dlsym(RTLD_NEXT, "openat64");
+    init_hooks();
     if (flags & O_CREAT) {
         va_list args;
         va_start(args, flags);
         mode_t mode = va_arg(args, mode_t);
         va_end(args);
-        return orig(dirfd, pathname, flags, mode);
+        return real_openat64(dirfd, pathname, flags, mode);
     }
-    return orig(dirfd, pathname, flags);
+    return real_openat64(dirfd, pathname, flags);
 }
 
 int execve(const char *pathname, char *const argv[], char *const envp[]) {
@@ -120,8 +145,8 @@ int execve(const char *pathname, char *const argv[], char *const envp[]) {
             }
         }
     }
-    int (*orig)(const char*, char* const*, char* const*) = dlsym(RTLD_NEXT, "execve");
-    return orig(pathname, argv, envp);
+    init_hooks();
+    return real_execve(pathname, argv, envp);
 }
 
 long syscall(long number, ...) {
@@ -161,6 +186,6 @@ long syscall(long number, ...) {
     }
 #endif
     
-    long (*orig)(long, ...) = dlsym(RTLD_NEXT, "syscall");
-    return orig(number, a1, a2, a3, a4, a5, a6);
+    init_hooks();
+    return real_syscall(number, a1, a2, a3, a4, a5, a6);
 }

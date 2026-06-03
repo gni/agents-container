@@ -52,15 +52,37 @@ iptables -A ISOLATION-FW -s 172.21.0.100 -j ACCEPT
 # Read blocklisted IPs and ranges using python
 python_out="$(python3 -c "
 import json
+import ipaddress
+
+def clean_ips(lst):
+    cleaned = []
+    for item in lst:
+        try:
+            ipaddress.ip_address(item)
+            cleaned.append(item)
+        except ValueError:
+            pass
+    return cleaned
+
+def clean_ranges(lst):
+    cleaned = []
+    for item in lst:
+        try:
+            ipaddress.ip_network(item, strict=False)
+            cleaned.append(item)
+        except ValueError:
+            pass
+    return cleaned
+
 try:
     with open('$CONFIG_FILE') as f:
         cfg = json.load(f)
     fw = cfg.get('firewall', {})
-    ips = fw.get('blocklist_ips', [])
-    ranges = fw.get('blocklist_ranges', [])
+    ips = clean_ips(fw.get('blocklist_ips', []))
+    ranges = clean_ranges(fw.get('blocklist_ranges', []))
     
     # Extract allowed upstreams
-    allowed = []
+    raw_allowed = []
     dnat_ips = []
     hosts = cfg.get('hosts', {})
     for h, host_cfg in hosts.items():
@@ -68,12 +90,12 @@ try:
         if hp and hp.get('enabled', True):
             up = hp.get('upstream', '')
             if '//' in up:
-                allowed.append(up.split('//')[1].split(':')[0])
+                raw_allowed.append(up.split('//')[1].split(':')[0])
         tp = host_cfg.get('tls_proxy', {})
         if tp:
             tip = tp.get('targetIp', '')
             if tip:
-                allowed.append(tip)
+                raw_allowed.append(tip)
         
         # Extract custom IP A records for DNAT transparent redirection
         for r in host_cfg.get('records', []):
@@ -81,6 +103,9 @@ try:
                 addr = r.get('address', '')
                 if addr and addr not in ('172.20.0.53', '0.0.0.0', '127.0.0.1'):
                     dnat_ips.append(addr)
+                    
+    allowed = clean_ips(raw_allowed)
+    dnat_ips = clean_ips(dnat_ips)
                 
     out_ips = [ip for ip in ips if not ip.startswith('127.')]
     out_ranges = [r for r in ranges if not (r.startswith('127.') or r.startswith('172.20.') or r.startswith('172.21.'))]
@@ -93,7 +118,6 @@ try:
 except Exception as e:
     pass
 ")"
-
 BL_IPS=$(echo "$python_out" | sed -n '1p')
 BL_RANGES=$(echo "$python_out" | sed -n '2p')
 OUT_IPS=$(echo "$python_out" | sed -n '3p')
