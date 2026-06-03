@@ -1,0 +1,111 @@
+services:
+  ottergate:
+    build:
+      context: .
+      dockerfile: Dockerfile.ottergate
+    runtime: runc
+    cap_add:
+      - NET_ADMIN
+    user: "root"
+    ports:
+      - "8080:8080/tcp"  # Control Plane bind
+      - "8053:53/udp"    # DNS UDP bind
+      - "8053:53/tcp"    # DNS TCP bind
+      - "8081:80/tcp"    # HTTP proxy bind
+      - "8443:443/tcp"   # SNI proxy bind
+    volumes:
+      - ../config:/app/config
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log/gvisor:/var/log/gvisor:ro
+    environment:
+      - OTTERGATE_PORT=53
+      - OTTERGATE_FALLBACK_DNS=1.1.1.1
+      - OTTERGATE_SANDBOX_SUBNETS=172.20.0.0/16,172.21.0.0/16
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+    command: ["--config", "/app/config/config.json", "start"]
+    networks:
+      sandbox_net:
+        ipv4_address: 172.20.0.53
+      test_net:
+      external_net:
+
+  agent:
+    build:
+      context: /app
+      dockerfile: docker/Dockerfile.agent
+      args:
+        AGENT_TYPE: ${AGENT_TYPE}
+    image: local/agent-${AGENT_TYPE}-agent:latest
+    container_name: agent_instance_${INSTANCE_NAME}
+    runtime: runsc
+    cap_add:
+      - SYS_PTRACE
+    tty: true
+    stdin_open: true
+
+    dns:
+      - 172.20.0.53
+
+    environment:
+      - HOME=/home/node
+      - HOST_UID=${HOST_UID:-1000}
+      - HOST_GID=${HOST_GID:-1000}
+      - INSTANCE_NAME=${INSTANCE_NAME}
+      - GIT_AUTHOR_NAME=${GIT_NAME}
+      - GIT_AUTHOR_EMAIL=${GIT_EMAIL}
+      - GIT_COMMITTER_NAME=${GIT_NAME}
+      - GIT_COMMITTER_EMAIL=${GIT_EMAIL}
+      - MESH_PROXY_IP=172.20.0.53
+
+    secrets:
+      - source: github_token
+        target: ${GH_SECRET_TARGET_PATH:-/run/secrets/gh_default}
+      - source: gitlab_token
+        target: ${GL_SECRET_TARGET_PATH:-/run/secrets/gl_default}
+
+    volumes:
+      - /app/config/resolv.conf:/etc/resolv.conf:ro
+      - /app/instances/${INSTANCE_NAME}/workspace:/workspace
+      - /app/instances/${INSTANCE_NAME}/home:/home/node/
+      - /app/agents/${AGENT_TYPE}/run.sh:/usr/local/bin/agent-run.sh:ro
+      - /app/config/certs:/usr/local/share/ca-certificates/custom:ro
+
+    tmpfs:
+      - /tmp:noexec,nodev,nosuid,mode=1777
+
+    networks:
+      - sandbox_net
+
+    restart: "no"
+    depends_on:
+      ottergate:
+        condition: service_healthy
+
+
+networks:
+  sandbox_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  test_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+  external_net:
+    driver: bridge
+
+secrets:
+  github_token:
+    file: /app/instances/${INSTANCE_NAME}/.secrets/github_token.txt
+  gitlab_token:
+    file: /app/instances/${INSTANCE_NAME}/.secrets/gitlab_token.txt

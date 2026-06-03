@@ -1,0 +1,327 @@
+#!/bin/bash
+set -e
+
+# Base directory of the isolation project
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_DIR"
+
+# Color Codes
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+# Help Menu
+show_usage() {
+    echo -e "${BLUE}${BOLD}================================================================${RESET}"
+    echo -e "${BLUE}${BOLD}               Isolation SecMesh Unified CLI Tool               ${RESET}"
+    echo -e "${BLUE}${BOLD}================================================================${RESET}"
+    echo -e "Usage: ./isolation <command> [arguments]\n"
+    echo -e "Commands:"
+    echo -e "  ${GREEN}start${RESET}                             Start the DinD host & Ottergate proxy"
+    echo -e "  ${GREEN}stop${RESET}                              Clean teardown of the infrastructure"
+    echo -e "  ${GREEN}restart${RESET}                           Restart the Ottergate proxy to apply config changes"
+    echo -e "  ${GREEN}status${RESET}                            Check the health of the isolated mesh"
+    echo -e "  ${GREEN}list${RESET}                              List running agent sandboxes and workspace folders"
+    echo -e "  ${GREEN}shell${RESET} <agent> [instance]          Spawn interactive gVisor sandbox shell"
+    echo -e "  ${GREEN}run${RESET} <agent> [instance]            Run the agent sandbox in headless mode"
+    echo -e "  ${GREEN}logs${RESET} [host | proxy | gvisor]      View logs from the DinD host, Ottergate, or gVisor"
+    echo -e "  ${GREEN}logs${RESET} agent <instance> [agent_type] View logs from a specific agent run"
+    echo -e "  ${GREEN}clean${RESET} <instance>                   Wipe specific agent credentials (retaining workspace)"
+    echo -e "  ${GREEN}destroy${RESET} <instance>                 Wipe specific agent credentials AND completely delete workspace"
+    echo -e "  ${GREEN}clean-all${RESET}                         Wipe all agent credentials (retaining workspaces)"
+    echo -e "  ${GREEN}destroy-all${RESET}                       Wipe all agent credentials AND completely delete workspaces\n"
+    echo -e "Examples:"
+    echo -e "  ./isolation start"
+    echo -e "  ./isolation shell pi my_pi_debug"
+    echo -e "  ./isolation list"
+    exit 0
+}
+
+# Ensure DinD is running and healthy
+ensure_dind_healthy() {
+    if ! docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+        echo -e "${YELLOW}[*] Starting isolation Docker-in-Docker host...${RESET}"
+        docker compose up -d
+    fi
+    until docker exec isolation-dind-host docker info >/dev/null 2>&1; do
+        sleep 2
+    done
+    
+    echo -e "${BLUE}[*] Waiting for secure isolation mesh to initialize...${RESET}"
+    echo -e "    ${BLUE}↳ Hint: Stream detailed boot & compilation logs in another terminal with: ./isolation logs host -f${RESET}"
+    
+    local last_phase=""
+    local healthy=""
+    
+    while true; do
+        healthy=$(docker exec isolation-dind-host docker inspect -f '{{.State.Health.Status}}' isolation-ottergate-1 2>/dev/null || echo "not_created")
+        if [ "$healthy" = "healthy" ]; then
+            break
+        fi
+        
+        # Determine the current boot phase from the logs of the DinD container
+        local phase="Initializing nested Docker daemon..."
+        local logs
+        logs=$(docker logs isolation-dind-host 2>&1 || echo "")
+        
+        if echo "$logs" | grep -q "Pre-building local/agent-base:latest"; then
+            phase="Pre-building base agent image (this takes up to a minute on first boot)..."
+        fi
+        if echo "$logs" | grep -q "Starting Ottergate inside nested Docker"; then
+            phase="Compiling and starting Ottergate zero-trust proxy..."
+        fi
+        if [ "$healthy" = "starting" ]; then
+            phase="Ottergate proxy started, running health checks..."
+        fi
+        
+        if [ "$phase" != "$last_phase" ]; then
+            echo -e "    ${YELLOW}↳ Phase: ${phase}${RESET}"
+            last_phase="$phase"
+        fi
+        
+        # Self-healing: if bootstrap is complete but Ottergate is exited/failed/unhealthy, boot it up!
+        if docker exec isolation-dind-host test -f /var/run/bootstrap_complete 2>/dev/null; then
+            if [ "$healthy" = "failed" ] || [ "$healthy" = "unhealthy" ] || [ "$healthy" = "exited" ] || [ "$healthy" = "not_created" ]; then
+                echo -e "    ${YELLOW}↳ [Self-Healing] Ottergate is offline. Restarting proxy...${RESET}"
+                docker exec -e AGENT_TYPE="${AGENT_TYPE:-pi}" -e INSTANCE_NAME="${INSTANCE_NAME:-pi_session}" isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml up -d ottergate >/dev/null 2>&1 || true
+            fi
+        fi
+        
+        sleep 2
+    done
+    
+    echo -e " ${GREEN}[Ready]${RESET}"
+}
+
+# Provision instances (folders, .env, secrets)
+provision_instance() {
+    local agent=$1
+    local inst=$2
+    mkdir -p instances/"$inst"/home instances/"$inst"/workspace instances/"$inst"/.secrets
+    chmod 700 instances/"$inst"/home instances/"$inst"/workspace instances/"$inst"/.secrets
+
+    if [ ! -f instances/"$inst"/.env ]; then
+        if [ -f config/.env.example ]; then
+            cp config/.env.example instances/"$inst"/.env
+        else
+            printf "GITHUB_TOKEN=your_token\nGITLAB_TOKEN=your_token\nGIT_NAME=\"Your Name\"\nGIT_EMAIL=\"your.email@example.com\"\n" > instances/"$inst"/.env
+        fi
+    fi
+
+    # Create dummy secret files to allow bind mounts
+    touch instances/"$inst"/.secrets/github_token.txt instances/"$inst"/.secrets/gitlab_token.txt
+    chmod 600 instances/"$inst"/.secrets/*.txt
+
+    # Extract tokens from .env into secret files if present
+    if [ -f instances/"$inst"/.env ]; then
+        grep -E "^(GITHUB_TOKEN|GH_TOKEN)=" instances/"$inst"/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > instances/"$inst"/.secrets/github_token.txt || true
+        grep -E "^GITLAB_TOKEN=" instances/"$inst"/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > instances/"$inst"/.secrets/gitlab_token.txt || true
+    fi
+    chmod 400 instances/"$inst"/.secrets/*.txt
+}
+
+if [ $# -lt 1 ]; then
+    show_usage
+fi
+
+COMMAND=$1
+shift
+
+case "$COMMAND" in
+    start)
+        echo -e "${BLUE}[*] Booting isolation mesh...${RESET}"
+        docker compose up -d
+        ensure_dind_healthy
+        echo -e "${GREEN}[✔] Isolation environment is fully secure and operational!${RESET}"
+        ;;
+    stop)
+        echo -e "${YELLOW}[*] Stopping and tearing down isolation mesh...${RESET}"
+        docker compose down -v
+        echo -e "${GREEN}[✔] Clean shutdown complete.${RESET}"
+        ;;
+    status)
+        echo -e "${BOLD}--- Outer Host Container Status ---${RESET}"
+        docker ps -f name=isolation-dind-host
+        echo -e "\n${BOLD}--- Nested Docker Containers Status ---${RESET}"
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec isolation-dind-host docker ps
+        else
+            echo -e "${RED}[!] DinD Host is not running.${RESET}"
+        fi
+        ;;
+    shell|run)
+        AGENT=${1:-pi}
+        if [ ! -d "agents/$AGENT" ]; then
+            echo -e "${RED}[!] Error: Agent blueprint '${AGENT}' does not exist in 'agents/' directory.${RESET}"
+            echo -e "Available agent blueprints in 'agents/':"
+            for d in agents/*; do
+                if [ -d "$d" ]; then
+                    echo -e "  - $(basename "$d")"
+                fi
+            done
+            exit 1
+        fi
+        INSTANCE=${2:-${AGENT}_session}
+        export AGENT_TYPE=$AGENT
+        export INSTANCE_NAME=$INSTANCE
+        export HOST_UID=$(id -u)
+        export HOST_GID=$(id -g)
+
+        provision_instance "$AGENT" "$INSTANCE"
+        ensure_dind_healthy
+
+        ENTRYPOINT_OPT=""
+        if [ "$COMMAND" = "shell" ]; then
+            ENTRYPOINT_OPT="--entrypoint /bin/sh"
+            echo -e "${BLUE}[*] Launching interactive shell inside nested gVisor sandbox...${RESET}"
+        else
+            echo -e "${BLUE}[*] Running nested gVisor agent headless...${RESET}"
+        fi
+
+        echo -e "${BOLD}----------------------------------------------------------------${RESET}"
+        docker exec -it \
+            -e AGENT_TYPE \
+            -e INSTANCE_NAME \
+            -e GH_SECRET_TARGET_PATH \
+            -e GL_SECRET_TARGET_PATH \
+            -e GIT_NAME \
+            -e GIT_EMAIL \
+            -e HOST_UID \
+            -e HOST_GID \
+            isolation-dind-host \
+            docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/"$INSTANCE"/.env run --build $ENTRYPOINT_OPT --rm agent
+        ;;
+    logs)
+        LAYER=$1
+        shift || true
+        case "$LAYER" in
+            host)
+                docker logs "$@" isolation-dind-host
+                ;;
+            proxy)
+                docker exec -it isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml logs "$@" ottergate
+                ;;
+            agent)
+                INST=$1
+                shift || true
+                AGENT_T=${1:-pi}
+                shift || true
+                if [ -z "$INST" ]; then
+                    echo -e "${RED}[!] Error: Please specify the instance name.${RESET}"
+                    echo -e "Usage: ./isolation logs agent <instance_name> [agent_type]"
+                    exit 1
+                fi
+                docker exec -it \
+                    -e AGENT_TYPE="$AGENT_T" \
+                    -e INSTANCE_NAME="$INST" \
+                    isolation-dind-host \
+                    docker compose -p isolation -f /app/docker/docker-compose.inner.yml logs "$@" agent
+                ;;
+            gvisor)
+                echo -e "${BLUE}${BOLD}--- Listing gVisor Sandbox Logs ---${RESET}"
+                if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+                    # Check if there are any log files inside /var/log/runsc/
+                    LOG_FILES=$(docker exec isolation-dind-host find /var/log/runsc/ -name "runsc.log.*" 2>/dev/null || true)
+                    if [ -n "$LOG_FILES" ]; then
+                        # Read the latest log file or print the list
+                        LATEST_LOG=$(docker exec isolation-dind-host sh -c 'ls -t /var/log/runsc/runsc.log.* 2>/dev/null | head -n 1')
+                        echo -e "Latest gVisor Log File: $LATEST_LOG\n"
+                        docker exec -it isolation-dind-host tail -n 100 "$LATEST_LOG"
+                    else
+                        echo "No active gVisor sandbox log files found yet. Start an agent session to generate traces."
+                    fi
+                else
+                    echo -e "${RED}[!] DinD Host is offline.${RESET}"
+                fi
+                ;;
+            *)
+                echo -e "${RED}[!] Invalid logs layer. Choose 'host', 'proxy', 'gvisor', or 'agent'.${RESET}"
+                exit 1
+                ;;
+        esac
+        ;;
+    list)
+        echo -e "${BLUE}${BOLD}--- Active Running Sandboxes (gVisor) ---${RESET}"
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec isolation-dind-host docker ps --filter name=agent_instance_ --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+        else
+            echo -e "${RED}[!] DinD Host is offline.${RESET}"
+        fi
+        echo -e "\n${BLUE}${BOLD}--- Available Instance Folders (Workspaces) ---${RESET}"
+        if [ -d instances ] && [ "$(ls -A instances)" ]; then
+            for d in instances/*; do
+                if [ -d "$d" ]; then
+                    inst_name=$(basename "$d")
+                    size=$(du -sh "$d" | cut -f1)
+                    has_secrets="No"
+                    [ -d "$d/.secrets" ] && has_secrets="Yes"
+                    echo -e "  - ${GREEN}${inst_name}${RESET} (Size: $size | Crypt Vault: $has_secrets)"
+                fi
+            done
+        else
+            echo "  No instance directories found."
+        fi
+        ;;
+    clean)
+        INST=$1
+        if [ -z "$INST" ]; then
+            echo -e "${RED}[!] Error: Please specify the instance name to clean.${RESET}"
+            exit 1
+        fi
+        echo -e "${YELLOW}[*] Retaining workspace and home directory. Wiping container and credentials for: $INST...${RESET}"
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec isolation-dind-host docker rm -f agent_instance_"$INST" 2>/dev/null || true
+        fi
+        rm -rf instances/"$INST"/.secrets
+        rm -f instances/"$INST"/.env
+        echo -e "${GREEN}[✔] Clean complete. Credentials removed. Workspace files preserved.${RESET}"
+        ;;
+    destroy)
+        INST=$1
+        if [ -z "$INST" ]; then
+            echo -e "${RED}[!] Error: Please specify the instance name to destroy.${RESET}"
+            exit 1
+        fi
+        echo -e "${RED}${BOLD}[WARN] Wiping nested container AND completely deleting workspace files for: $INST...${RESET}"
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec isolation-dind-host docker rm -f agent_instance_"$INST" 2>/dev/null || true
+        fi
+        rm -rf instances/"$INST"
+        echo -e "${GREEN}[✔] Destroy complete. Workspace files and credentials completely wiped.${RESET}"
+        ;;
+    clean-all)
+        echo -e "${YELLOW}[*] Shutting down nested containers and wiping ALL credentials. Retaining ALL workspaces...${RESET}"
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
+        fi
+        rm -rf instances/*/.secrets
+        rm -f instances/*/.env
+        echo -e "${GREEN}[✔] Clean-all complete. All container states and credentials wiped. All workspaces preserved.${RESET}"
+        ;;
+    destroy-all)
+        echo -e "${RED}${BOLD}[WARN] Performing absolute nuclear teardown of all containers, volumes, and ALL workspaces...${RESET}"
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
+        fi
+        docker compose down -v 2>/dev/null || true
+        rm -rf instances/*
+        echo -e "${GREEN}[✔] Teardown complete. All containers, volumes, credentials, and workspaces completely wiped.${RESET}"
+        ;;
+    restart)
+        echo -e "${BLUE}[*] Restarting Ottergate zero-trust proxy...${RESET}"
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml restart ottergate
+            docker exec isolation-dind-host chmod +x /app/src/update-iptables.sh
+            docker exec isolation-dind-host /bin/bash /app/src/update-iptables.sh
+            echo -e "${GREEN}[✔] Ottergate proxy restarted and network rules updated successfully.${RESET}"
+        else
+            echo -e "${RED}[!] DinD Host is not running. Run './isolation start' first.${RESET}"
+        fi
+        ;;
+    *)
+        show_usage
+        ;;
+esac

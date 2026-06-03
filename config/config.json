@@ -1,0 +1,233 @@
+{
+  "port": 53,
+  "httpPort": 80,
+  "httpsPort": 443,
+  "tls": {
+    "cert": "/app/config/server.crt",
+    "key": "/app/config/server.key",
+    "ca": "/app/config/ca.crt",
+    "serverName": "ottergate.loop"
+  },
+  "dotPort": null,
+  "dohPort": null,
+  "fallbackDns": "1.1.1.1",
+  "dnsCacheMaxSize": 1024,
+  "dnsCacheTtlMs": 300000,
+  "maxTcpConnections": 1000,
+  "tcpIdleTimeoutMs": 300000,
+  "rateLimitMaxRequests": 200,
+  "rateLimitWindowMs": 1000,
+  "firewall": {
+    "defaultPolicy": "deny",
+    "allowlist_domains": [
+      "*.openai.com",
+      "openai.com",
+      "*.anthropic.com",
+      "anthropic.com",
+      "*.googleapis.com",
+      "generativelanguage.googleapis.com",
+      "*.cohere.ai",
+      "*.groq.com",
+      "*.huggingface.co",
+      "huggingface.co",
+      "*.alpinelinux.org",
+      "*.ubuntu.com",
+      "*.debian.org",
+      "*.npmjs.org",
+      "registry.npmjs.org",
+      "*.pypi.org",
+      "files.pythonhosted.org",
+      "*.github.com",
+      "github.com",
+      "*.githubusercontent.com",
+      "*.google",
+      "antigravity.google",
+      "*.antigravity.google",
+      "antigravity-unleash.goog",
+      "*.antigravity-unleash.goog",
+      "secure-api.loop",
+      "ottergate.loop",
+      "pi.dev",
+      "*.googleusercontent.com",
+      "*.githubcopilot.com",
+      "brain.mlops"
+    ],
+    "blocklist_domains": [
+      "*.malicious-domain.example",
+      "malicious-domain.example"
+    ],
+    "allowlist_ips": [
+      "127.0.0.1",
+      "172.20.0.53",
+      "172.21.0.100",
+      "192.168.1.53"
+    ],
+    "blocklist_ips": [
+      "169.254.169.254",
+      "100.100.100.200"
+    ],
+    "allowlist_ranges": [
+      "0.0.0.0/0",
+      "127.0.0.0/8",
+      "172.20.0.0/16"
+    ],
+    "blocklist_ranges": [
+      "10.0.0.0/8",
+      "172.16.0.0/12",
+      "192.168.0.0/16",
+      "127.0.0.0/8",
+      "169.254.0.0/16"
+    ]
+  },
+  "controlPlane": {
+    "enabled": true,
+    "port": 8080,
+    "socketPath": "",
+    "apiKey": null,
+    "tls": null
+  },
+  "hosts": {
+    "*": {
+      "records": [
+        {
+          "type": "A",
+          "address": "172.20.0.53"
+        }
+      ]
+    },
+    "brain.mlops": {
+      "records": [
+        {
+          "type": "A",
+          "address": "172.53.0.53"
+        }
+      ],
+      "tls_proxy": {
+        "targetPort": 9090, 
+        "targetIp": "192.168.1.53"
+      }
+    },
+    "intercept.ai.loop": {
+      "records": [
+        {
+          "type": "A",
+          "address": "172.20.0.53"
+        }
+      ],
+      "http_proxy": {
+        "enabled": true,
+        "upstream": "http://127.0.0.1:3000",
+        "headers": {
+          "X-Environment": "production-mesh-v1"
+        },
+        "forwardRequestBody": false,
+        "maxRequestBodyBytes": 1048576,
+        "clientTls": null
+      }
+    },
+    "redirect.loop": {
+      "records": [
+        {
+          "type": "A",
+          "address": "0.0.0.0"
+        }
+      ],
+      "redirect": {
+        "enabled": false,
+        "code": 302,
+        "target": "https://github.com/archive/main"
+      }
+    },
+    "secure-api.loop": {
+      "records": [
+        {
+          "type": "A",
+          "address": "172.20.0.53"
+        }
+      ],
+      "http_proxy": {
+        "enabled": true,
+        "upstream": "https://172.21.0.100:1234",
+        "headers": {
+          "X-Environment": "production-mesh-v1"
+        },
+        "forwardRequestBody": false,
+        "maxRequestBodyBytes": 1048576,
+        "clientTls": {
+          "cert": "/app/config/client.crt",
+          "key": "/app/config/client.key",
+          "ca": "/app/config/ca.crt",
+          "serverName": "ottergate.loop"
+        }
+      }
+    },
+    "ottergate.loop": {
+      "records": [
+        {
+          "type": "A",
+          "address": "172.20.0.53"
+        }
+      ],
+      "tls_proxy": {
+        "targetPort": 1235,
+        "targetIp": "172.21.0.100"
+      },
+      "redirect": {
+        "enabled": true,
+        "code": 301,
+        "target": "https://ottergate.loop"
+      }
+    },
+    "reload-test.loop": {
+      "records": [
+        {
+          "type": "A",
+          "address": "1.2.3.4"
+        }
+      ]
+    },
+    "test-records.loop": {
+      "records": [
+        {
+          "type": "A",
+          "address": "10.0.0.1"
+        },
+        {
+          "type": "AAAA",
+          "address": "2001:db8::1"
+        },
+        {
+          "type": "TXT",
+          "data": [
+            "v=spf1 -all",
+            "ottergate-test-string"
+          ]
+        },
+        {
+          "type": "MX",
+          "priority": 10,
+          "exchange": "mail.test-records.loop"
+        },
+        {
+          "type": "NS",
+          "target": "ns1.test-records.loop"
+        },
+        {
+          "type": "CNAME",
+          "target": "test-records.loop"
+        },
+        {
+          "type": "PTR",
+          "target": "test-records.loop"
+        },
+        {
+          "type": "SRV",
+          "priority": 10,
+          "weight": 5,
+          "port": 5060,
+          "target": "sip.test-records.loop"
+        }
+      ]
+    }
+  }
+}
