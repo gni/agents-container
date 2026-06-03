@@ -2,7 +2,7 @@ services:
   isolation-dind:
     build:
       context: .
-      dockerfile: docker/Dockerfile.dind
+      dockerfile: docker/host/Dockerfile.dind
     container_name: isolation-dind-host
     runtime: runc  # Force standard container runtime instead of host's default
     privileged: true  # Required for Docker-in-Docker to run, create bridge interfaces, and mount cgroups

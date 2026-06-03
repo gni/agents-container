@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1
+FROM local/agent-base:latest
+
+ARG AGENT_TYPE
+
+# Copy custom CA certificates for enterprise SSL proxy/registry access during build
+COPY config/ottergate/certs/ /usr/local/share/ca-certificates/custom/
+RUN if [ -d /usr/local/share/ca-certificates/custom ] && [ "$(ls -A /usr/local/share/ca-certificates/custom)" ]; then \
+        update-ca-certificates; \
+    fi
+
+# Set environment variables so build-time tools (npm, pip, etc.) trust the custom CA
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+COPY agents/blueprints/${AGENT_TYPE}/install.sh /tmp/install.sh
+
+RUN chmod +x /tmp/install.sh && NODE_OPTIONS="" /tmp/install.sh && rm /tmp/install.sh
+
+ENV LD_PRELOAD="/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy.so"
+ENV PATH="/home/node/.local/bin:${PATH}"
+
+ENTRYPOINT ["/usr/local/bin/init-guard", "sh", "/usr/local/bin/agent-run.sh"]
+CMD []

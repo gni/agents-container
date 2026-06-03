@@ -39,8 +39,9 @@ echo "[dind-entrypoint] Verifying available Docker runtimes:"
 docker info | grep -E "Runtimes|runsc|crun" || true
 
 
-if [ ! -f /app/config/ca.crt ]; then
+if [ ! -f /app/config/ottergate/ca.crt ]; then
     echo "[dind-entrypoint] Generating test TLS certificates..."
+    mkdir -p /app/config/ottergate/certs
     
     SRV_EXT_FILE=$(mktemp)
     CLI_EXT_FILE=$(mktemp)
@@ -49,38 +50,42 @@ if [ ! -f /app/config/ca.crt ]; then
     printf "subjectAltName=DNS:ottergate.loop,DNS:*.ottergate.loop,IP:172.20.0.53" > "$SRV_EXT_FILE"
     printf "subjectAltName=DNS:client.test.local" > "$CLI_EXT_FILE"
 
-    openssl req -x509 -new -nodes -keyout /app/config/ca.key -sha256 -days 365 -out /app/config/ca.crt -subj "/CN=Test CA"
+    openssl req -x509 -new -nodes -keyout /app/config/ottergate/ca.key -sha256 -days 365 -out /app/config/ottergate/ca.crt -subj "/CN=Test CA"
     
-    openssl req -new -nodes -keyout /app/config/server.key -out /app/config/server.csr -subj "/CN=ottergate.loop"
-    openssl x509 -req -in /app/config/server.csr -CA /app/config/ca.crt -CAkey /app/config/ca.key -CAcreateserial -out /app/config/server.crt -days 365 -sha256 -extfile "$SRV_EXT_FILE"
+    openssl req -new -nodes -keyout /app/config/ottergate/server.key -out /app/config/ottergate/server.csr -subj "/CN=ottergate.loop"
+    openssl x509 -req -in /app/config/ottergate/server.csr -CA /app/config/ottergate/ca.crt -CAkey /app/config/ottergate/ca.key -CAcreateserial -out /app/config/ottergate/server.crt -days 365 -sha256 -extfile "$SRV_EXT_FILE"
     
-    openssl req -new -nodes -keyout /app/config/client.key -out /app/config/client.csr -subj "/CN=client.test.local"
-    openssl x509 -req -in /app/config/client.csr -CA /app/config/ca.crt -CAkey /app/config/ca.key -CAcreateserial -out /app/config/client.crt -days 365 -sha256 -extfile "$CLI_EXT_FILE"
+    openssl req -new -nodes -keyout /app/config/ottergate/client.key -out /app/config/ottergate/client.csr -subj "/CN=client.test.local"
+    openssl x509 -req -in /app/config/ottergate/client.csr -CA /app/config/ottergate/ca.crt -CAkey /app/config/ottergate/ca.key -CAcreateserial -out /app/config/ottergate/client.crt -days 365 -sha256 -extfile "$CLI_EXT_FILE"
 
     rm -f "$SRV_EXT_FILE" "$CLI_EXT_FILE"
 
     # Secure the private keys with correct file permissions
-    chmod 600 /app/config/ca.key /app/config/server.key /app/config/client.key 2>/dev/null || true
-    chmod 644 /app/config/ca.crt /app/config/server.crt /app/config/client.crt 2>/dev/null || true
+    chmod 600 /app/config/ottergate/ca.key /app/config/ottergate/server.key /app/config/ottergate/client.key 2>/dev/null || true
+    chmod 644 /app/config/ottergate/ca.crt /app/config/ottergate/server.crt /app/config/ottergate/client.crt 2>/dev/null || true
 
     # Fix ownership of config certificates so host user can access them
-    chown -R $(stat -c "%u:%g" /app) /app/config/ca.key /app/config/ca.crt /app/config/server.key /app/config/server.crt /app/config/client.key /app/config/client.crt /app/config/ca.srl 2>/dev/null || true
+    chown -R $(stat -c "%u:%g" /app) /app/config/ottergate/ca.key /app/config/ottergate/ca.crt /app/config/ottergate/server.key /app/config/ottergate/server.crt /app/config/ottergate/client.key /app/config/ottergate/client.crt /app/config/ottergate/ca.srl 2>/dev/null || true
 fi
 
-if [ ! -f /app/config/resolv.conf ]; then
+if [ ! -f /app/config/ottergate/resolv.conf ]; then
     echo "[dind-entrypoint] Creating resolv.conf pointing to Ottergate (172.20.0.53)..."
-    echo "nameserver 172.20.0.53" > /app/config/resolv.conf
+    echo "nameserver 172.20.0.53" > /app/config/ottergate/resolv.conf
 fi
 
-echo "[dind-entrypoint] Pre-building local/agent-base:latest inside nested Docker..."
-docker build -t local/agent-base:latest -f /app/docker/Dockerfile.base /app
+if ! docker image inspect local/agent-base:latest >/dev/null 2>&1; then
+    echo "[dind-entrypoint] Pre-building local/agent-base:latest inside nested Docker..."
+    docker build -t local/agent-base:latest -f /app/docker/agent/Dockerfile.base /app
+else
+    echo "[dind-entrypoint] Found cached local/agent-base:latest, skipping build."
+fi
 
 echo "[dind-entrypoint] Starting Ottergate inside nested Docker..."
-docker compose -p isolation -f /app/docker/docker-compose.inner.yml up -d --build ottergate
+docker compose -p isolation -f /app/docker/docker-compose.inner.yml up -d ottergate
 
 # Enforce network-level isolation and IP blocklists using iptables
-chmod +x /app/src/update-iptables.sh
-/bin/bash /app/src/update-iptables.sh
+chmod +x /app/src/network/update-iptables.sh
+/bin/bash /app/src/network/update-iptables.sh
 
 echo "[dind-entrypoint] System initialized successfully. Streaming Ottergate inner logs:"
 touch /var/run/bootstrap_complete

@@ -53,19 +53,27 @@ Instead, all agent DNS queries and outbound L7 (HTTP/HTTPS) traffic are intercep
 ```bash
 isolation/
 ├── docker/
-│   ├── Dockerfile.dind            # Outer DinD Host setup
-│   ├── Dockerfile.base            # Agent base image with dynamic CLI vaults/guards
-│   ├── Dockerfile.agent           # Specific agent build file
-│   ├── daemon.json                # Nested docker daemon (gVisor configuration)
-│   ├── entrypoint-dind.sh         # DinD bootstrapper (clones Ottergate, starts nested compose)
+│   ├── agent/
+│   │   ├── Dockerfile.base        # Agent base image with dynamic CLI vaults/guards
+│   │   └── Dockerfile.agent       # Specific agent build file
+│   ├── host/
+│   │   ├── Dockerfile.dind        # Outer DinD Host setup
+│   │   ├── daemon.json            # Nested docker daemon config (gVisor configuration)
+│   │   └── entrypoint-dind.sh     # DinD bootstrapper (clones Ottergate, starts nested compose)
+│   ├── proxy/
+│   │   └── Dockerfile.ottergate   # Ottergate build file
 │   └── docker-compose.inner.yml   # Nested Docker orchestration (Ottergate & Agent)
 ├── config/
-│   └── config.json                # Ottergate DNS & Firewall policy configuration
-├── src/                           # Custom agent compilation tools and path locks
-│   ├── app-firewall.js            # Node FS path hook & security policy
-│   ├── cli-vault.c / net-proxy.c  # GCC libraries preventing token leak & proxying bypass
-│   └── *.sh                       # Shell wraps for git/gh binaries
-├── agents/                        # Blueprints for agents (gemini, codex, pi, etc.)
+│   ├── templates/
+│   │   └── .env.example           # Example workspace environment variables
+│   └── ottergate/
+│       └── config.json            # Ottergate DNS & Firewall policy configuration
+├── src/                           # Custom sandboxing and credential vaulting source files
+│   ├── vault/                     # Credential protection (init-guard, gh-guard, cli-vault, etc.)
+│   ├── sandbox/                   # Agent isolation libraries (fs-vault, net-proxy, app-firewall)
+│   └── network/                   # Network firewall helper rules (update-iptables.sh)
+├── agents/
+│   └── blueprints/                # Blueprints for agents (gemini, codex, pi, etc.)
 ├── instances/                     # Dynamic running workspace directories (synchronized)
 ├── Makefile                       # Execution and control interface
 └── docker-compose.yml             # Host-level orchestration (DinD start/stop)

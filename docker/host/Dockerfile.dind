@@ -18,15 +18,15 @@ RUN wget https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/ru
     mv runsc containerd-shim-runsc-v1 /usr/local/bin/
 
 # Copy Docker daemon configuration supporting gVisor (runsc) and crun
-COPY docker/daemon.json /etc/docker/daemon.json
+COPY docker/host/daemon.json /etc/docker/daemon.json
 
 # Create app directory and copy codebase
 WORKDIR /app
 COPY . .
 
 # Ensure scripts are executable if they exist
-RUN chmod +x /app/docker/entrypoint-dind.sh && \
+RUN chmod +x /app/docker/host/entrypoint-dind.sh && \
     if [ -d /app/tests ]; then chmod +x /app/tests/*.sh /app/tests/*.py /app/tests/*.js 2>/dev/null || true; fi
 
 # Set the entrypoint to bootstrap our isolated environment
-ENTRYPOINT ["/app/docker/entrypoint-dind.sh"]
+ENTRYPOINT ["/app/docker/host/entrypoint-dind.sh"]

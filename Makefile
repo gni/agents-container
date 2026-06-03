@@ -36,27 +36,27 @@ help:
 	@printf "  ARGS              Additional arguments to pass to the run command.\n\n"
 
 setup-global:
-	@mkdir -p src config docker agents instances
-	@if [ ! -f config/.env.example ]; then \
-		printf "GITHUB_TOKEN=ghp_your_secure_token_here\nGITLAB_TOKEN=glpat-your_secure_token_here\nGIT_NAME=\"Your Name\"\nGIT_EMAIL=\"your.email@example.com\"\nPARANOID_MODE=true\n" > config/.env.example; \
+	@mkdir -p src/vault src/sandbox src/network config/ottergate config/templates docker agents/blueprints instances
+	@if [ ! -f config/templates/.env.example ]; then \
+		printf "GITHUB_TOKEN=ghp_your_secure_token_here\nGITLAB_TOKEN=glpat-your_secure_token_here\nGIT_NAME=\"Your Name\"\nGIT_EMAIL=\"your.email@example.com\"\nPARANOID_MODE=true\n" > config/templates/.env.example; \
 	fi
 
 setup-agent:
-	@mkdir -p agents/$(AGENT_TYPE)
-	@if [ ! -f agents/$(AGENT_TYPE)/install.sh ]; then \
-		printf "#!/bin/sh\n# Install dependencies for $(AGENT_TYPE)\n" > agents/$(AGENT_TYPE)/install.sh; \
-		chmod +x agents/$(AGENT_TYPE)/install.sh; \
+	@mkdir -p agents/blueprints/$(AGENT_TYPE)
+	@if [ ! -f agents/blueprints/$(AGENT_TYPE)/install.sh ]; then \
+		printf "#!/bin/sh\n# Install dependencies for $(AGENT_TYPE)\n" > agents/blueprints/$(AGENT_TYPE)/install.sh; \
+		chmod +x agents/blueprints/$(AGENT_TYPE)/install.sh; \
 	fi
-	@if [ ! -f agents/$(AGENT_TYPE)/run.sh ]; then \
-		printf "#!/bin/sh\n# Execution logic for $(AGENT_TYPE)\nexec $(AGENT_TYPE) \"\$$@\"\n" > agents/$(AGENT_TYPE)/run.sh; \
-		chmod +x agents/$(AGENT_TYPE)/run.sh; \
+	@if [ ! -f agents/blueprints/$(AGENT_TYPE)/run.sh ]; then \
+		printf "#!/bin/sh\n# Execution logic for $(AGENT_TYPE)\nexec $(AGENT_TYPE) \"\$$@\"\n" > agents/blueprints/$(AGENT_TYPE)/run.sh; \
+		chmod +x agents/blueprints/$(AGENT_TYPE)/run.sh; \
 	fi
 
 setup-instance:
 	@mkdir -p instances/$(INSTANCE_NAME)/home instances/$(INSTANCE_NAME)/workspace instances/$(INSTANCE_NAME)/.secrets
 	@chmod 700 instances/$(INSTANCE_NAME)/home instances/$(INSTANCE_NAME)/workspace instances/$(INSTANCE_NAME)/.secrets
 	@if [ ! -f instances/$(INSTANCE_NAME)/.env ]; then \
-		cp config/.env.example instances/$(INSTANCE_NAME)/.env; \
+		cp config/templates/.env.example instances/$(INSTANCE_NAME)/.env; \
 		printf "\n======================================================================\n"; \
 		printf " [ACTION REQUIRED] Auto-generated missing .env template.\n"; \
 		printf " Please edit: instances/$(INSTANCE_NAME)/.env\n"; \

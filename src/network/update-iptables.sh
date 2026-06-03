@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-CONFIG_FILE="/app/config/config.json"
+CONFIG_FILE="/app/config/ottergate/config.json"
 
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[update-iptables] Error: Config file not found at $CONFIG_FILE"

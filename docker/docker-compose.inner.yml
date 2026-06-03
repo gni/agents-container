@@ -2,7 +2,7 @@ services:
   ottergate:
     build:
       context: .
-      dockerfile: Dockerfile.ottergate
+      dockerfile: proxy/Dockerfile.ottergate
     runtime: runc
     cap_add:
       - NET_ADMIN
@@ -14,7 +14,7 @@ services:
       - "8081:80/tcp"    # HTTP proxy bind
       - "8443:443/tcp"   # SNI proxy bind
     volumes:
-      - ../config:/app/config
+      - ../config/ottergate:/app/config
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/log/gvisor:/var/log/gvisor:ro
     environment:
@@ -38,7 +38,7 @@ services:
   agent:
     build:
       context: /app
-      dockerfile: docker/Dockerfile.agent
+      dockerfile: docker/agent/Dockerfile.agent
       args:
         AGENT_TYPE: ${AGENT_TYPE}
     image: local/agent-${AGENT_TYPE}-agent:latest
@@ -70,11 +70,11 @@ services:
         target: ${GL_SECRET_TARGET_PATH:-/run/secrets/gl_default}
 
     volumes:
-      - /app/config/resolv.conf:/etc/resolv.conf:ro
+      - /app/config/ottergate/resolv.conf:/etc/resolv.conf:ro
       - /app/instances/${INSTANCE_NAME}/workspace:/workspace
       - /app/instances/${INSTANCE_NAME}/home:/home/node/
-      - /app/agents/${AGENT_TYPE}/run.sh:/usr/local/bin/agent-run.sh:ro
-      - /app/config/certs:/usr/local/share/ca-certificates/custom:ro
+      - /app/agents/blueprints/${AGENT_TYPE}/run.sh:/usr/local/bin/agent-run.sh:ro
+      - /app/config/ottergate/certs:/usr/local/share/ca-certificates/custom:ro
 
     tmpfs:
       - /tmp:noexec,nodev,nosuid,mode=1777
