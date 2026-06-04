@@ -3,10 +3,7 @@
     "runsc": {
       "path": "/usr/local/bin/runsc",
       "runtimeArgs": [
-        "--platform=ptrace",
-        "--debug",
-        "--strace",
-        "--debug-log=/var/log/gvisor/%ID%/runsc.log.%%COMMAND%%"
+        "--platform=ptrace"
       ]
     },
     "crun": {

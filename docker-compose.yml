@@ -18,6 +18,11 @@ services:
       - dind-storage:/var/lib/docker
       # Mount the whole project directory from host to let users update files dynamically
       - .:/app
+    environment:
+      - GVISOR_DEBUG=${GVISOR_DEBUG:-true}
+      - OTTERGATE_STREAM_CONTAINER_LOGS=${OTTERGATE_STREAM_CONTAINER_LOGS:-false}
+      - OTTERGATE_STREAM_GVISOR_LOGS=${OTTERGATE_STREAM_GVISOR_LOGS:-true}
+      - OTTERGATE_LOG_CONTAINER_STDOUT=${OTTERGATE_LOG_CONTAINER_STDOUT:-false}
     restart: unless-stopped
 
 volumes:

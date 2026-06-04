@@ -50,6 +50,19 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
     pid_t cur_pid = client_pid;
     int legit_git_op = 0;
     
+    // Ensure the immediate client is exactly vault-wrapper
+    char client_exe[512];
+    char client_link[128];
+    snprintf(client_link, sizeof(client_link), "/proc/%d/exe", client_pid);
+    ssize_t client_len = readlink(client_link, client_exe, sizeof(client_exe) - 1);
+    if (client_len == -1) {
+        return 0;
+    }
+    client_exe[client_len] = '\0';
+    if (strcmp(client_exe, "/usr/local/bin/vault-wrapper") != 0) {
+        return 0;
+    }
+    
     while (cur_pid > 1) {
         char exe_link[128];
         char exe_path[512];
@@ -264,9 +277,7 @@ void run_vault_daemon() {
 }
 
 int main(int argc, char **argv) {
-    // Print a cool sci-fi style header for the sandbox loader
-    printf("\n\033[1;35m[*] SecMesh Secure Sandbox Agent Bootloader\033[0m\n");
-    printf("\033[1;30m------------------------------------------------------------\033[0m\n");
+    printf("\n\033[1;30m--- sandbox startup ---\033[0m\n");
     fflush(stdout);
     usleep(50000);
 
@@ -282,7 +293,9 @@ int main(int argc, char **argv) {
         setenv("REQUESTS_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt", 1);
         setenv("SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt", 1);
     }
-    print_status("*", "Verifying zero-trust TLS certificates", "\033[1;32mVERIFIED\033[0m");
+    setenv("LD_PRELOAD", "/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy.so", 1);
+    setenv("MESH_PROXY_IP", "172.20.0.53", 1);
+    print_status(" *", "verifying certificates", "\033[32mdone\033[0m");
 
     int secrets_copied = 0;
     DIR *d = opendir("/run/secrets");
@@ -299,9 +312,9 @@ int main(int argc, char **argv) {
 
     chmod("/run/secrets", 0000);
     if (secrets_copied) {
-        print_status("*", "Injecting API credentials into dynamic vault", "\033[1;32mSECURED\033[0m");
+        print_status(" *", "setting up credentials", "\033[32mdone\033[0m");
     } else {
-        print_status("*", "API credentials vault initialization", "\033[1;33mBYPASSED\033[0m");
+        print_status(" *", "setting up credentials", "\033[33mbypassed\033[0m");
     }
 
     uid_t target_uid = 1000;
@@ -325,21 +338,21 @@ int main(int argc, char **argv) {
         run_vault_daemon();
         exit(0);
     }
-    print_status("*", "Booting secure credential validation daemon", "\033[1;32mACTIVE\033[0m");
+    print_status(" *", "starting vault daemon", "\033[32mdone\033[0m");
 
     // Fix ownership of home directory and workspace before dropping privileges
     char chown_cmd[512];
     snprintf(chown_cmd, sizeof(chown_cmd), "chown -R %d:%d /home/node /workspace 2>/dev/null", target_uid, target_gid);
     int chown_res = system(chown_cmd);
     (void)chown_res;
-    print_status("*", "Enforcing directory ownership and volume mappings", "\033[1;32mENFORCED\033[0m");
+    print_status(" *", "setting permissions", "\033[32mdone\033[0m");
 
     if (setgroups(1, &target_gid) != 0) return 1;
     if (setresgid(target_gid, target_gid, target_gid) != 0) return 1;
     if (setresuid(target_uid, target_uid, target_uid) != 0) return 1;
-    print_status("*", "Hardening process isolation (non-root jail)", "\033[1;32mLOCKED\033[0m");
+    print_status(" *", "dropping privileges", "\033[32mdone\033[0m");
 
-    printf("\033[1;30m------------------------------------------------------------\033[0m\n\n");
+    printf("\033[1;30m-----------------------\033[0m\n\n");
     fflush(stdout);
     usleep(50000);
 

@@ -8,35 +8,48 @@ cd "$PROJECT_DIR"
 # Color Codes
 GREEN='\033[0;32m'
 RED='\033[0;31m'
-YELLOW='\033[1;33m'
+YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+DIM='\033[1;30m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
+# Logger helpers to distinguish elements cleanly without emojis or uppercase
+log_action() { echo -e "${CYAN}*${RESET} $1"; }
+log_success() { echo -e "${GREEN}*${RESET} $1"; }
+log_warn() { echo -e "${YELLOW}warning:${RESET} $1"; }
+log_error() { echo -e "${RED}error:${RESET} $1"; }
+log_info() { echo -e "${DIM}info:${RESET} $1"; }
+
 # Help Menu
 show_usage() {
-    echo -e "${BLUE}${BOLD}================================================================${RESET}"
-    echo -e "${BLUE}${BOLD}               Isolation SecMesh Unified CLI Tool               ${RESET}"
-    echo -e "${BLUE}${BOLD}================================================================${RESET}"
-    echo -e "Usage: ./isolation <command> [arguments]\n"
-    echo -e "Commands:"
-    echo -e "  ${GREEN}start${RESET}                             Start the DinD host & Ottergate proxy"
-    echo -e "  ${GREEN}stop${RESET}                              Clean teardown of the infrastructure"
-    echo -e "  ${GREEN}restart${RESET}                           Restart the Ottergate proxy to apply config changes"
-    echo -e "  ${GREEN}status${RESET}                            Check the health of the isolated mesh"
-    echo -e "  ${GREEN}list${RESET}                              List running agent sandboxes and workspace folders"
-    echo -e "  ${GREEN}shell${RESET} <agent> [instance] [--build] Spawn interactive gVisor sandbox shell"
-    echo -e "  ${GREEN}run${RESET} <agent> [instance] [--build]   Run the agent sandbox in headless mode"
-    echo -e "  ${GREEN}build${RESET} <agent> [--base]            Force build/rebuild of agent and base images"
-    echo -e "  ${GREEN}logs${RESET} [host | proxy | gvisor]      View logs from the DinD host, Ottergate, or gVisor"
-    echo -e "  ${GREEN}logs${RESET} agent <instance> [agent_type] View logs from a specific agent run"
-    echo -e "  ${GREEN}clean${RESET} <instance>                   Wipe specific agent credentials (retaining workspace)"
-    echo -e "  ${GREEN}destroy${RESET} <instance>                 Wipe specific agent credentials AND completely delete workspace"
-    echo -e "  ${GREEN}clean-all${RESET}                         Wipe all agent credentials (retaining workspaces)"
-    echo -e "  ${GREEN}destroy-all${RESET}                       Wipe all agent credentials AND completely delete workspaces\n"
-    echo -e "Examples:"
+    echo -e "usage: ./isolation <command> [arguments] [options]\n"
+    echo -e "commands:"
+    echo -e "  ${GREEN}start${RESET}                             start the host daemon and proxy"
+    echo -e "  ${GREEN}stop${RESET}                              stop the host daemon and proxy"
+    echo -e "  ${GREEN}down${RESET}                              stop and remove all containers"
+    echo -e "  ${GREEN}restart${RESET}                           restart proxy and update network rules"
+    echo -e "  ${GREEN}status${RESET}                            check daemon and sandboxes status"
+    echo -e "  ${GREEN}stats${RESET}                             stream real-time container resource stats"
+    echo -e "  ${GREEN}list${RESET}                              list running sandboxes and workspaces"
+    echo -e "  ${GREEN}shell${RESET} <agent> [instance]           spawn an interactive sandbox shell"
+    echo -e "  ${GREEN}run${RESET} <agent> [instance]             run sandbox in headless mode"
+    echo -e "  ${GREEN}build${RESET} <agent> [--base]            force rebuild agent/base images"
+    echo -e "  ${GREEN}logs${RESET} [host | proxy | gvisor]      view logs from host, proxy, or gvisor"
+    echo -e "  ${GREEN}logs${RESET} agent <instance> [agent]     view logs from a specific agent instance"
+    echo -e "  ${GREEN}clean${RESET} <instance>                   wipe instance credentials (preserve workspace)"
+    echo -e "  ${GREEN}destroy${RESET} <instance>                 wipe instance credentials and delete workspace"
+    echo -e "  ${GREEN}clean-all${RESET}                         wipe credentials for all instances"
+    echo -e "  ${GREEN}destroy-all${RESET}                       wipe credentials and delete all workspaces\n"
+    echo -e "options:"
+    echo -e "  --build, -b                       force rebuild agent image before running"
+    echo -e "  --cpus <limit>                    limit cpu cores allocated to the sandbox"
+    echo -e "  --memory, -m <limit>              limit memory allocated (e.g. 512m, 2g)"
+    echo -e "  --gpus <devices>                  allocate gpu devices (e.g. all, none)\n"
+    echo -e "examples:"
     echo -e "  ./isolation start"
-    echo -e "  ./isolation shell pi my_pi_debug"
+    echo -e "  ./isolation shell pi my_pi_debug --cpus 2 -m 1g"
     echo -e "  ./isolation list"
     exit 0
 }
@@ -44,46 +57,45 @@ show_usage() {
 # Ensure DinD is running and healthy
 ensure_dind_healthy() {
     if ! docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-        echo -e "${YELLOW}[*] Starting isolation Docker-in-Docker host...${RESET}"
+        echo -e "starting host daemon..."
         docker compose up -d
     fi
     until docker exec isolation-dind-host docker info >/dev/null 2>&1; do
-        sleep 2
+        sleep 1
     done
     
-    echo -e "${BLUE}[SecMesh] Bootstrapping zero-trust isolation boundaries...${RESET}"
-    echo -e "   \033[1;30m* Tip: Stream raw bootstrap & compilation logs in another terminal using:\033[0m"
-    echo -e "      \033[1;33m./isolation logs host -f\033[0m\n"
+    echo -e "starting mesh network..."
+    echo -e "  stream logs in another terminal: ./isolation logs host -f\n"
     
     local spin='-\|/'
     local i=0
     local count=0
     local healthy=""
-    local phase="Initializing nested Docker daemon..."
+    local phase="starting docker daemon..."
     
     while true; do
-        # Throttled check: inspect status and logs every 2 seconds (every 4 ticks of 0.5s)
         if [ $((count % 4)) -eq 0 ]; then
             healthy=$(docker exec isolation-dind-host docker inspect -f '{{.State.Health.Status}}' isolation-ottergate-1 2>/dev/null || echo "not_created")
             if [ "$healthy" = "healthy" ]; then
                 break
             fi
             
-            # Determine the current boot phase from the logs of the DinD container
             local logs
             logs=$(docker logs isolation-dind-host 2>&1 || echo "")
             
             if echo "$logs" | grep -q "Pre-building local/agent-base:latest"; then
-                phase="Pre-building base agent image (this takes up to a minute on first boot)..."
+                phase="building base agent image (takes up to a minute)..."
+            fi
+            if echo "$logs" | grep -q "pre-building paranoid base image"; then
+                phase="building paranoid base image (takes up to a minute)..."
             fi
             if echo "$logs" | grep -q "Starting Ottergate inside nested Docker"; then
-                phase="Compiling and starting Ottergate zero-trust proxy..."
+                phase="starting proxy..."
             fi
             if [ "$healthy" = "starting" ]; then
-                phase="Ottergate proxy started, running health checks..."
+                phase="verifying proxy..."
             fi
             
-            # Self-healing: if bootstrap is complete but Ottergate is offline/failed, boot it up!
             if docker exec isolation-dind-host test -f /var/run/bootstrap_complete 2>/dev/null; then
                 if [ "$healthy" = "failed" ] || [ "$healthy" = "unhealthy" ] || [ "$healthy" = "exited" ] || [ "$healthy" = "not_created" ]; then
                     docker exec -e AGENT_TYPE="${AGENT_TYPE:-pi}" -e INSTANCE_NAME="${INSTANCE_NAME:-pi_session}" isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml up -d ottergate >/dev/null 2>&1 || true
@@ -91,14 +103,12 @@ ensure_dind_healthy() {
             fi
         fi
         
-        # Render spinning character and clear the rest of the line via \033[K
-        printf "\r    \033[1;36m↳ [%c]\033[0m %s\033[K" "${spin:i++%4:1}" "$phase"
-        
-        sleep 0.5
+        printf "\r  [%c] %s\033[K" "${spin:i++%4:1}" "$phase"
+        sleep 0.25
         count=$((count + 1))
     done
     
-    printf "\r    \033[1;32m↳ [OK] Secure isolation mesh online!\033[0m\033[K\n"
+    printf "\r  * mesh network is online\033[K\n"
 }
 
 # Provision instances (folders, .env, secrets)
@@ -128,6 +138,30 @@ provision_instance() {
     chmod 400 instances/"$inst"/.secrets/*.txt
 }
 
+# Determine paranoid mode and select base image
+get_base_image_config() {
+    local inst=$1
+    local paranoid=false
+    if [ -f "instances/$inst/.env" ]; then
+        if grep -qE "^PARANOID_MODE=true" "instances/$inst/.env"; then
+            paranoid=true
+        fi
+    fi
+    if [ "$PARANOID_MODE" = "true" ]; then
+        paranoid=true
+    fi
+
+    if [ "$paranoid" = "true" ]; then
+        export BASE_IMAGE="local/agent-base:paranoid"
+        export BASE_IMAGE_TAG="paranoid"
+        export DOCKERFILE_PATH="Dockerfile.paranoid"
+    else
+        export BASE_IMAGE="local/agent-base:latest"
+        export BASE_IMAGE_TAG="latest"
+        export DOCKERFILE_PATH="Dockerfile.base"
+    fi
+}
+
 if [ $# -lt 1 ]; then
     show_usage
 fi
@@ -137,48 +171,80 @@ shift
 
 case "$COMMAND" in
     start)
-        echo -e "${BLUE}[SecMesh] Booting isolation mesh...${RESET}"
+        echo -e "starting mesh..."
         docker compose up -d
         ensure_dind_healthy
-        echo -e "${GREEN}[OK] Isolation environment is fully secure and operational!${RESET}"
+        echo -e "mesh started successfully."
         ;;
     stop)
-        echo -e "${YELLOW}[*] Stopping and tearing down isolation mesh...${RESET}"
+        echo -e "stopping mesh..."
+        docker compose stop
+        echo -e "mesh stopped."
+        ;;
+    down)
+        echo -e "tearing down mesh..."
         docker compose down -v
-        echo -e "${GREEN}[OK] Clean shutdown complete.${RESET}"
+        echo -e "mesh torn down."
         ;;
     status)
-        echo -e "${BOLD}--- Outer Host Container Status ---${RESET}"
+        echo -e "host container status:"
         docker ps -f name=isolation-dind-host
-        echo -e "\n${BOLD}--- Nested Docker Containers Status ---${RESET}"
+        echo -e "\nhost container resource usage:"
+        docker stats --no-stream isolation-dind-host
+        
+        echo -e "\nnested containers status:"
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
             docker exec isolation-dind-host docker ps
+            echo -e "\nnested containers resource usage:"
+            docker exec isolation-dind-host docker stats --no-stream
         else
-            echo -e "${RED}[!] DinD Host is not running.${RESET}"
+            echo -e "error: host is not running."
         fi
         ;;
     shell|run)
         AGENT=""
         INSTANCE=""
         FORCE_BUILD=false
+        CPUS_LIMIT=""
+        MEMORY_LIMIT=""
+        GPUS_LIMIT=""
         
         # Parse arguments
-        for arg in "$@"; do
-            if [ "$arg" = "--build" ] || [ "$arg" = "-b" ]; then
-                FORCE_BUILD=true
-            elif [ -z "$AGENT" ]; then
-                AGENT="$arg"
-            elif [ -z "$INSTANCE" ]; then
-                INSTANCE="$arg"
-            fi
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --build|-b)
+                    FORCE_BUILD=true
+                    shift
+                    ;;
+                --cpus)
+                    CPUS_LIMIT="$2"
+                    shift 2
+                    ;;
+                --memory|-m)
+                    MEMORY_LIMIT="$2"
+                    shift 2
+                    ;;
+                --gpus)
+                    GPUS_LIMIT="$2"
+                    shift 2
+                    ;;
+                *)
+                    if [ -z "$AGENT" ]; then
+                        AGENT="$1"
+                    elif [ -z "$INSTANCE" ]; then
+                        INSTANCE="$1"
+                    fi
+                    shift
+                    ;;
+            esac
         done
         
         AGENT=${AGENT:-pi}
         INSTANCE=${INSTANCE:-${AGENT}_session}
 
         if [ ! -d "agents/blueprints/$AGENT" ]; then
-            echo -e "${RED}[!] Error: Agent blueprint '${AGENT}' does not exist in 'agents/blueprints/' directory.${RESET}"
-            echo -e "Available agent blueprints in 'agents/blueprints/':"
+            echo -e "error: blueprint '${AGENT}' does not exist"
+            echo -e "available blueprints:"
             for d in agents/blueprints/*; do
                 if [ -d "$d" ]; then
                     echo -e "  - $(basename "$d")"
@@ -193,35 +259,59 @@ case "$COMMAND" in
 
         provision_instance "$AGENT" "$INSTANCE"
         ensure_dind_healthy
+        get_base_image_config "$INSTANCE"
+
+        # Load resource limits from the instance's .env file if present and not overridden by CLI
+        if [ -f "instances/$INSTANCE/.env" ]; then
+            [ -z "$CPUS_LIMIT" ] && CPUS_LIMIT=$(grep -E "^AGENT_CPUS=" instances/"$INSTANCE"/.env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+            [ -z "$MEMORY_LIMIT" ] && MEMORY_LIMIT=$(grep -E "^(AGENT_MEMORY|MEMORY_LIMIT)=" instances/"$INSTANCE"/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+            [ -z "$GPUS_LIMIT" ] && GPUS_LIMIT=$(grep -E "^AGENT_GPUS=" instances/"$INSTANCE"/.env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+        fi
+
+        LIMITS_OPT=""
+        [ -n "$CPUS_LIMIT" ] && LIMITS_OPT="$LIMITS_OPT --cpus=$CPUS_LIMIT"
+        [ -n "$MEMORY_LIMIT" ] && LIMITS_OPT="$LIMITS_OPT --memory=$MEMORY_LIMIT"
+        [ -n "$GPUS_LIMIT" ] && LIMITS_OPT="$LIMITS_OPT --gpus=$GPUS_LIMIT"
 
         ENTRYPOINT_OPT=""
         if [ "$COMMAND" = "shell" ]; then
             ENTRYPOINT_OPT="--entrypoint /bin/sh"
-            echo -e "${BLUE}[*] Launching interactive shell inside nested gVisor sandbox...${RESET}"
+            echo -e "starting interactive shell..."
         else
-            echo -e "${BLUE}[*] Running nested gVisor agent headless...${RESET}"
+            echo -e "starting agent..."
         fi
 
-        IMAGE_EXISTS=$(docker exec isolation-dind-host docker images -q "local/agent-${AGENT}-agent:latest" 2>/dev/null || true)
+        BASE_EXISTS=$(docker exec isolation-dind-host docker images -q "${BASE_IMAGE}" 2>/dev/null || true)
+        if [ -z "$BASE_EXISTS" ] || [ "$FORCE_BUILD" = true ]; then
+            echo -e "building ${BASE_IMAGE} using ${DOCKERFILE_PATH}..."
+            docker exec -it isolation-dind-host docker build -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
+        fi
+
+        IMAGE_EXISTS=$(docker exec isolation-dind-host docker images -q "local/agent-${AGENT}-agent:${BASE_IMAGE_TAG}" 2>/dev/null || true)
         if [ -z "$IMAGE_EXISTS" ] || [ "$FORCE_BUILD" = true ]; then
-            echo -e "${YELLOW}[*] Building agent image 'local/agent-${AGENT}-agent:latest'...${RESET}"
-            docker exec -it isolation-dind-host docker build -t local/agent-${AGENT}-agent:latest -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} /app
+            echo -e "building agent image..."
+            docker exec -it isolation-dind-host docker build -t local/agent-${AGENT}-agent:${BASE_IMAGE_TAG} -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
         else
-            echo -e "${GREEN}[*] Reusing cached agent image: local/agent-${AGENT}-agent:latest (use --build to force rebuild)${RESET}"
+            echo -e "reusing cached agent image (use --build to rebuild)"
         fi
 
-        echo -e "${BOLD}----------------------------------------------------------------${RESET}"
+        echo ""
         docker exec -it \
             -e AGENT_TYPE \
             -e INSTANCE_NAME \
+            -e BASE_IMAGE \
+            -e BASE_IMAGE_TAG \
             -e GH_SECRET_TARGET_PATH \
             -e GL_SECRET_TARGET_PATH \
             -e GIT_NAME \
             -e GIT_EMAIL \
             -e HOST_UID \
             -e HOST_GID \
+            -e TERM="${TERM:-xterm-256color}" \
+            -e AGENT_CPUS="${CPUS_LIMIT:-0}" \
+            -e AGENT_MEMORY="${MEMORY_LIMIT:-0}" \
             isolation-dind-host \
-            docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/"$INSTANCE"/.env run $ENTRYPOINT_OPT --rm agent
+            docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/"$INSTANCE"/.env run $ENTRYPOINT_OPT --no-deps --rm agent
         ;;
     logs)
         LAYER=$1
@@ -239,8 +329,8 @@ case "$COMMAND" in
                 AGENT_T=${1:-pi}
                 shift || true
                 if [ -z "$INST" ]; then
-                    echo -e "${RED}[!] Error: Please specify the instance name.${RESET}"
-                    echo -e "Usage: ./isolation logs agent <instance_name> [agent_type]"
+                    echo -e "error: specify instance name"
+                    echo -e "usage: ./isolation logs agent <instance> [agent]"
                     exit 1
                 fi
                 docker exec -it \
@@ -250,94 +340,131 @@ case "$COMMAND" in
                     docker compose -p isolation -f /app/docker/docker-compose.inner.yml logs "$@" agent
                 ;;
             gvisor)
-                echo -e "${BLUE}${BOLD}--- Listing gVisor Sandbox Logs ---${RESET}"
+                echo -e "gvisor sandbox logs:"
                 if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-                    # Check if there are any log files inside /var/log/runsc/
-                    LOG_FILES=$(docker exec isolation-dind-host find /var/log/runsc/ -name "runsc.log.*" 2>/dev/null || true)
+                    LOG_FILES=$(docker exec isolation-dind-host sh -c 'find /var/log/runsc/ /var/log/gvisor/ -name "runsc.log.*" 2>/dev/null' || true)
                     if [ -n "$LOG_FILES" ]; then
-                        # Read the latest log file or print the list
-                        LATEST_LOG=$(docker exec isolation-dind-host sh -c 'ls -t /var/log/runsc/runsc.log.* 2>/dev/null | head -n 1')
-                        echo -e "Latest gVisor Log File: $LATEST_LOG\n"
+                        LATEST_LOG=$(docker exec isolation-dind-host sh -c 'ls -t $(find /var/log/runsc/ /var/log/gvisor/ -name "runsc.log.*" 2>/dev/null) 2>/dev/null | head -n 1')
+                        echo -e "latest log file: $LATEST_LOG\n"
                         docker exec -it isolation-dind-host tail -n 100 "$LATEST_LOG"
                     else
-                        echo "No active gVisor sandbox log files found yet. Start an agent session to generate traces."
+                        echo "no active gvisor logs found. enable GVISOR_DEBUG=true to generate logs."
                     fi
                 else
-                    echo -e "${RED}[!] DinD Host is offline.${RESET}"
+                    echo -e "error: host is offline."
                 fi
                 ;;
             *)
-                echo -e "${RED}[!] Invalid logs layer. Choose 'host', 'proxy', 'gvisor', or 'agent'.${RESET}"
+                echo -e "error: invalid logs layer. choose 'host', 'proxy', 'gvisor', or 'agent'."
                 exit 1
                 ;;
         esac
         ;;
     list)
-        echo -e "${BLUE}${BOLD}--- Active Running Sandboxes (gVisor) ---${RESET}"
+        echo -e "running sandboxes:"
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec isolation-dind-host docker ps --filter name=agent_instance_ --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+            ps_out=$(docker exec isolation-dind-host docker ps --filter name=agent_instance_ --format '{{.Names}}	{{.Status}}	{{.Image}}' 2>/dev/null || true)
+            
+            printf "  \033[1;30m%-36s %-20s %-32s\033[0m\n" "name" "status" "image"
+            printf "  \033[1;30m----------------------------------------------------------------------------------------\033[0m\n"
+            
+            if [ -n "$ps_out" ]; then
+                echo "$ps_out" | while IFS=$'\t' read -r name status image; do
+                    short_name=${name#agent_instance_}
+                    short_name=${short_name,,}
+                    status=${status,,}
+                    image=${image,,}
+                    printf "  %-36s %-20s %-32s\n" "$short_name" "$status" "$image"
+                done
+            else
+                printf "  \033[0;33m%-36s\033[0m\n" "no running sandboxes"
+            fi
+            printf "  \033[1;30m----------------------------------------------------------------------------------------\033[0m\n"
         else
-            echo -e "${RED}[!] DinD Host is offline.${RESET}"
+            echo -e "error: host is offline."
         fi
-        echo -e "\n${BLUE}${BOLD}--- Available Instance Folders (Workspaces) ---${RESET}"
+        
+        echo -e "\navailable workspaces:"
+        printf "  \033[1;30m%-36s %-12s %-12s\033[0m\n" "name" "size" "secrets"
+        printf "  \033[1;30m------------------------------------------------------------\033[0m\n"
+        
         if [ -d instances ] && [ "$(ls -A instances)" ]; then
             for d in instances/*; do
                 if [ -d "$d" ]; then
                     inst_name=$(basename "$d")
+                    inst_name=${inst_name,,}
+                    
                     size=$(du -sh "$d" | cut -f1)
-                    has_secrets="No"
-                    [ -d "$d/.secrets" ] && has_secrets="Yes"
-                    echo -e "  - ${GREEN}${inst_name}${RESET} (Size: $size | Crypt Vault: $has_secrets)"
+                    size=${size,,}
+                    
+                    has_secrets="no"
+                    secrets_color="\033[0;33m"
+                    if [ -d "$d/.secrets" ] && [ "$(ls -A "$d/.secrets" 2>/dev/null)" ]; then
+                        has_data=false
+                        for f in "$d"/.secrets/*.txt; do
+                            if [ -s "$f" ]; then
+                                has_data=true
+                                break
+                            fi
+                        done
+                        if [ "$has_data" = true ]; then
+                            has_secrets="yes"
+                            secrets_color="\033[0;32m"
+                        fi
+                    fi
+                    
+                    printf "  %-36s %-12s ${secrets_color}%-12s\033[0m\n" "$inst_name" "$size" "$has_secrets"
                 fi
             done
         else
-            echo "  No instance directories found."
+            printf "  \033[0;33m%-36s\033[0m\n" "no workspaces found"
         fi
+        printf "  \033[1;30m------------------------------------------------------------\033[0m\n"
         ;;
     clean)
         INST=$1
         if [ -z "$INST" ]; then
-            echo -e "${RED}[!] Error: Please specify the instance name to clean.${RESET}"
+            echo -e "error: specify instance name"
             exit 1
         fi
-        echo -e "${YELLOW}[*] Retaining workspace and home directory. Wiping container and credentials for: $INST...${RESET}"
+        echo -e "cleaning credentials for $INST..."
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
             docker exec isolation-dind-host docker rm -f agent_instance_"$INST" 2>/dev/null || true
         fi
         rm -rf instances/"$INST"/.secrets
         rm -f instances/"$INST"/.env
-        echo -e "${GREEN}[OK] Clean complete. Credentials removed. Workspace files preserved.${RESET}"
+        echo -e "cleaned."
         ;;
     destroy)
         INST=$1
         if [ -z "$INST" ]; then
-            echo -e "${RED}[!] Error: Please specify the instance name to destroy.${RESET}"
+            echo -e "error: specify instance name"
             exit 1
         fi
-        echo -e "${RED}${BOLD}[WARN] Wiping nested container AND completely deleting workspace files for: $INST...${RESET}"
+        echo -e "destroying $INST (this will delete workspace files)..."
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
             docker exec isolation-dind-host docker rm -f agent_instance_"$INST" 2>/dev/null || true
         fi
         rm -rf instances/"$INST"
-        echo -e "${GREEN}[OK] Destroy complete. Workspace files and credentials completely wiped.${RESET}"
+        echo -e "destroyed."
         ;;
     clean-all)
-        echo -e "${YELLOW}[*] Shutting down nested containers and wiping ALL credentials. Retaining ALL workspaces...${RESET}"
+        echo -e "cleaning all credentials..."
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
             docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
         fi
         rm -rf instances/*/.secrets
         rm -f instances/*/.env
-        echo -e "${GREEN}[OK] Clean-all complete. All container states and credentials wiped. All workspaces preserved.${RESET}"
+        echo -e "cleaned all."
         ;;
     destroy-all)
-        echo -e "${RED}${BOLD}[WARN] Performing absolute nuclear teardown of all containers, volumes, and ALL workspaces...${RESET}"
+        echo -e "destroying all containers, volumes, and workspaces..."
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
             docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
         fi
         docker compose down -v 2>/dev/null || true
         rm -rf instances/*
-        echo -e "${GREEN}[OK] Teardown complete. All containers, volumes, credentials, and workspaces completely wiped.${RESET}"
+        echo -e "destroyed all."
         ;;
     build)
         AGENT=""
@@ -351,33 +478,42 @@ case "$COMMAND" in
         done
         AGENT=${AGENT:-pi}
         if [ ! -d "agents/blueprints/$AGENT" ]; then
-            echo -e "${RED}[!] Error: Agent blueprint '${AGENT}' does not exist in 'agents/blueprints/' directory.${RESET}"
+            echo -e "error: blueprint '${AGENT}' does not exist"
             exit 1
         fi
         
+        get_base_image_config "${AGENT}_session"
         ensure_dind_healthy
         
-        BASE_EXISTS=$(docker exec isolation-dind-host docker images -q "local/agent-base:latest" 2>/dev/null || true)
+        BASE_EXISTS=$(docker exec isolation-dind-host docker images -q "${BASE_IMAGE}" 2>/dev/null || true)
         if [ -z "$BASE_EXISTS" ] || [ "$FORCE_BASE" = true ]; then
-            echo -e "${BLUE}[*] Building local/agent-base:latest...${RESET}"
-            docker exec -it isolation-dind-host docker build -t local/agent-base:latest -f /app/docker/agent/Dockerfile.base /app
+            echo -e "building ${BASE_IMAGE} using ${DOCKERFILE_PATH}..."
+            docker exec -it isolation-dind-host docker build -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
         else
-            echo -e "${GREEN}[*] Found cached local/agent-base:latest. (Use --base to force rebuild)${RESET}"
+            echo -e "reusing cached ${BASE_IMAGE} (use --base to rebuild)"
         fi
         
-        echo -e "${BLUE}[*] Building agent blueprint '${AGENT}'...${RESET}"
-        docker exec -it isolation-dind-host docker build -t local/agent-${AGENT}-agent:latest -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} /app
-        echo -e "${GREEN}[OK] Build complete for agent blueprint: ${AGENT}${RESET}"
+        echo -e "building agent blueprint '${AGENT}'..."
+        docker exec -it isolation-dind-host docker build -t local/agent-${AGENT}-agent:latest -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
+        echo -e "built agent blueprint: ${AGENT}"
+        ;;
+    stats)
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            echo -e "streaming nested container stats (press ctrl+c to exit)..."
+            docker exec -it isolation-dind-host docker stats
+        else
+            echo -e "error: host is not running. run './isolation start' first."
+        fi
         ;;
     restart)
-        echo -e "${BLUE}[*] Restarting Ottergate zero-trust proxy...${RESET}"
+        echo -e "restarting proxy..."
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
             docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml restart ottergate
             docker exec isolation-dind-host chmod +x /app/src/network/update-iptables.sh
             docker exec isolation-dind-host /bin/bash /app/src/network/update-iptables.sh
-            echo -e "${GREEN}[OK] Ottergate proxy restarted and network rules updated successfully.${RESET}"
+            echo -e "proxy restarted successfully."
         else
-            echo -e "${RED}[!] DinD Host is not running. Run './isolation start' first.${RESET}"
+            echo -e "error: host is not running. run './isolation start' first."
         fi
         ;;
     *)

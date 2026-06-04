@@ -21,6 +21,9 @@ services:
       - OTTERGATE_PORT=53
       - OTTERGATE_FALLBACK_DNS=1.1.1.1
       - OTTERGATE_SANDBOX_SUBNETS=172.20.0.0/16,172.21.0.0/16
+      - OTTERGATE_STREAM_CONTAINER_LOGS=${OTTERGATE_STREAM_CONTAINER_LOGS:-false}
+      - OTTERGATE_STREAM_GVISOR_LOGS=${OTTERGATE_STREAM_GVISOR_LOGS:-false}
+      - OTTERGATE_LOG_CONTAINER_STDOUT=${OTTERGATE_LOG_CONTAINER_STDOUT:-true}
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
       interval: 2s
@@ -28,6 +31,7 @@ services:
       retries: 10
       start_period: 5s
     restart: unless-stopped
+    mem_limit: 1g
     command: ["--config", "/app/config/config.json", "start"]
     networks:
       sandbox_net:
@@ -41,16 +45,22 @@ services:
       dockerfile: docker/agent/Dockerfile.agent
       args:
         AGENT_TYPE: ${AGENT_TYPE}
-    image: local/agent-${AGENT_TYPE}-agent:latest
+        BASE_IMAGE: ${BASE_IMAGE:-local/agent-base:latest}
+    image: local/agent-${AGENT_TYPE}-agent:${BASE_IMAGE_TAG:-latest}
     container_name: agent_instance_${INSTANCE_NAME}
     runtime: runsc
     cap_add:
       - SYS_PTRACE
     tty: true
     stdin_open: true
+    cpus: ${AGENT_CPUS:-0}
+    mem_limit: ${AGENT_MEMORY:-0}
 
     dns:
       - 172.20.0.53
+
+    env_file:
+      - /app/instances/${INSTANCE_NAME}/.env
 
     environment:
       - HOME=/home/node
@@ -62,6 +72,7 @@ services:
       - GIT_COMMITTER_NAME=${GIT_NAME}
       - GIT_COMMITTER_EMAIL=${GIT_EMAIL}
       - MESH_PROXY_IP=172.20.0.53
+      - TERM=${TERM:-xterm-256color}
 
     secrets:
       - source: github_token
@@ -74,7 +85,8 @@ services:
       - /app/instances/${INSTANCE_NAME}/workspace:/workspace
       - /app/instances/${INSTANCE_NAME}/home:/home/node/
       - /app/agents/blueprints/${AGENT_TYPE}/run.sh:/usr/local/bin/agent-run.sh:ro
-      - /app/config/ottergate/certs:/usr/local/share/ca-certificates/custom:ro
+      - /app/config/ottergate/certs/custom:/usr/local/share/ca-certificates/custom:ro
+      - /app/shared/skills:/workspace/skills:ro
 
     tmpfs:
       - /tmp:noexec,nodev,nosuid,mode=1777

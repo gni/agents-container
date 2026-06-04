@@ -57,11 +57,8 @@ setup-instance:
 	@chmod 700 instances/$(INSTANCE_NAME)/home instances/$(INSTANCE_NAME)/workspace instances/$(INSTANCE_NAME)/.secrets
 	@if [ ! -f instances/$(INSTANCE_NAME)/.env ]; then \
 		cp config/templates/.env.example instances/$(INSTANCE_NAME)/.env; \
-		printf "\n======================================================================\n"; \
-		printf " [ACTION REQUIRED] Auto-generated missing .env template.\n"; \
-		printf " Please edit: instances/$(INSTANCE_NAME)/.env\n"; \
-		printf " Fill in your actual tokens before continuing execution.\n"; \
-		printf "======================================================================\n\n"; \
+		printf "\n* created template environment file: instances/$(INSTANCE_NAME)/.env\n"; \
+		printf "  edit this file to configure your credentials before running.\n\n"; \
 	fi
 	@chmod 600 instances/$(INSTANCE_NAME)/.secrets/*.txt 2>/dev/null || true
 	@rm -f instances/$(INSTANCE_NAME)/.secrets/*.txt
@@ -83,18 +80,26 @@ setup-instance:
 
 dind-start:
 	@if ! docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$$"; then \
-		echo "[HOST] Starting outer isolation Docker-in-Docker container..."; \
+		echo "starting host daemon..."; \
 		docker compose up -d; \
 	fi
-	@echo "[HOST] Waiting for nested Docker daemon to be fully ready..."
+	@echo "waiting for nested docker daemon..."
 	@until docker exec isolation-dind-host docker info >/dev/null 2>&1; do sleep 1; done
-	@echo "[HOST] Waiting for nested Ottergate proxy to be healthy..."
+	@echo "waiting for proxy..."
 	@until docker exec isolation-dind-host docker inspect -f '{{.State.Health.Status}}' isolation-ottergate-1 2>/dev/null | grep -q "healthy"; do sleep 1; done
-	@echo "[HOST] Nested DinD and gVisor isolation mesh are operational!"
+	@echo "mesh network is online."
 
 run: setup-global setup-agent setup-instance dind-start
-	@echo "[RUN] Executing agent $(AGENT_TYPE) (Instance: $(INSTANCE_NAME)) nested behind gVisor..."
-	@docker exec -it \
+	@echo "starting agent $(AGENT_TYPE)..."
+	@PARANOID=$$(grep -E "^PARANOID_MODE=" instances/$(INSTANCE_NAME)/.env 2>/dev/null | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true); \
+	if [ "$$PARANOID" = "true" ] || [ "$$PARANOID_MODE" = "true" ]; then \
+		export BASE_IMAGE="local/agent-base:paranoid"; \
+		export BASE_IMAGE_TAG="paranoid"; \
+	else \
+		export BASE_IMAGE="local/agent-base:latest"; \
+		export BASE_IMAGE_TAG="latest"; \
+	fi; \
+	docker exec -it \
 		-e AGENT_TYPE \
 		-e INSTANCE_NAME \
 		-e GH_SECRET_TARGET_PATH \
@@ -103,12 +108,25 @@ run: setup-global setup-agent setup-instance dind-start
 		-e GIT_EMAIL \
 		-e HOST_UID \
 		-e HOST_GID \
+		-e TERM="$${TERM:-xterm-256color}" \
+		-e AGENT_CPUS="$${AGENT_CPUS:-0}" \
+		-e AGENT_MEMORY="$${AGENT_MEMORY:-0}" \
+		-e BASE_IMAGE="$$BASE_IMAGE" \
+		-e BASE_IMAGE_TAG="$$BASE_IMAGE_TAG" \
 		isolation-dind-host \
-		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/$(INSTANCE_NAME)/.env run --rm agent $(ARGS)
+		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/$(INSTANCE_NAME)/.env run --no-deps --rm agent $(ARGS)
 
 shell: setup-global setup-agent setup-instance dind-start
-	@echo "[SHELL] Launching shell in agent $(AGENT_TYPE) (Instance: $(INSTANCE_NAME)) nested behind gVisor..."
-	@docker exec -it \
+	@echo "starting interactive shell..."
+	@PARANOID=$$(grep -E "^PARANOID_MODE=" instances/$(INSTANCE_NAME)/.env 2>/dev/null | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true); \
+	if [ "$$PARANOID" = "true" ] || [ "$$PARANOID_MODE" = "true" ]; then \
+		export BASE_IMAGE="local/agent-base:paranoid"; \
+		export BASE_IMAGE_TAG="paranoid"; \
+	else \
+		export BASE_IMAGE="local/agent-base:latest"; \
+		export BASE_IMAGE_TAG="latest"; \
+	fi; \
+	docker exec -it \
 		-e AGENT_TYPE \
 		-e INSTANCE_NAME \
 		-e GH_SECRET_TARGET_PATH \
@@ -117,23 +135,28 @@ shell: setup-global setup-agent setup-instance dind-start
 		-e GIT_EMAIL \
 		-e HOST_UID \
 		-e HOST_GID \
+		-e TERM="$${TERM:-xterm-256color}" \
+		-e AGENT_CPUS="$${AGENT_CPUS:-0}" \
+		-e AGENT_MEMORY="$${AGENT_MEMORY:-0}" \
+		-e BASE_IMAGE="$$BASE_IMAGE" \
+		-e BASE_IMAGE_TAG="$$BASE_IMAGE_TAG" \
 		isolation-dind-host \
-		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/$(INSTANCE_NAME)/.env run --entrypoint /bin/sh --rm agent
+		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/$(INSTANCE_NAME)/.env run --no-deps --entrypoint /bin/sh --rm agent
 
 
 clean-instance:
-	@echo "[CLEAN] Destroying nested agent instance: $(INSTANCE_NAME)"
+	@echo "cleaning credentials for $(INSTANCE_NAME)..."
 	@docker exec isolation-dind-host docker rm -f agent_instance_$(INSTANCE_NAME) 2>/dev/null || true
 	@rm -rf instances/$(INSTANCE_NAME)/.secrets
 clean-all:
-	@echo "[CLEAN] Teardown of all nested containers and wiping ALL credentials (retaining workspaces)..."
+	@echo "cleaning all credentials..."
 	@docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
 	docker compose down -v 2>/dev/null || true
 	rm -rf instances/*/.secrets 2>/dev/null || true
 	rm -f instances/*/.env 2>/dev/null || true
 
 destroy-all:
-	@echo "[DESTROY] Nuclear teardown of all containers, volumes, and ALL workspaces..."
+	@echo "destroying all workspaces and containers..."
 	@docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
 	docker compose down -v 2>/dev/null || true
 	rm -rf instances/*
