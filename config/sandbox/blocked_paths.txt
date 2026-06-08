@@ -1,0 +1,8 @@
+# Custom Sandbox Blocked Paths
+# -----------------------------
+# Add absolute paths of files or directories you want to block the agent from accessing.
+# One path per line. Empty lines and lines starting with '#' are ignored.
+#
+# Examples:
+# /workspace/confidential.txt
+# /workspace/private_keys/

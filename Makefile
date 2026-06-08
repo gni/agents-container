@@ -13,8 +13,14 @@ export GH_SECRET_TARGET_PATH ?= /run/secrets/gh_$(RANDOM_ID)
 export GL_SECRET_TARGET_PATH ?= /run/secrets/gl_$(RANDOM_ID)
 
 # Dynamic defaults for agent and instance provisioning
+export INSTANCES_DIR ?= instances
 export AGENT_TYPE ?= pi
 export INSTANCE_NAME ?= $(AGENT_TYPE)_$(RANDOM_ID)
+
+# Ensure INSTANCE_NAME is at least 2 characters to satisfy docker daemon constraints
+ifeq ($(shell [ $$(echo -n "$(INSTANCE_NAME)" | wc -m) -eq 1 ] && echo 1),1)
+override INSTANCE_NAME := $(INSTANCE_NAME)_
+endif
 
 help:
 	@printf "Docker-in-Docker & gVisor Security Mesh Agent Provisioning Control\n"
@@ -36,9 +42,9 @@ help:
 	@printf "  ARGS              Additional arguments to pass to the run command.\n\n"
 
 setup-global:
-	@mkdir -p src/vault src/sandbox src/network config/ottergate config/templates docker agents/blueprints instances
+	@mkdir -p src/vault src/sandbox src/network config/ottergate config/templates docker agents/blueprints $(INSTANCES_DIR)
 	@if [ ! -f config/templates/.env.example ]; then \
-		printf "GITHUB_TOKEN=ghp_your_secure_token_here\nGITLAB_TOKEN=glpat-your_secure_token_here\nGIT_NAME=\"Your Name\"\nGIT_EMAIL=\"your.email@example.com\"\nPARANOID_MODE=true\n" > config/templates/.env.example; \
+		printf "GITHUB_TOKEN=ghp_your_secure_token_here\nGITLAB_TOKEN=glpat-your_secure_token_here\nGIT_NAME=\"Your Name\"\nGIT_EMAIL=\"your.email@example.com\"\nPARANOID_MODE=true\nALLOW_PUSH=false\n" > config/templates/.env.example; \
 	fi
 
 setup-agent:
@@ -53,30 +59,30 @@ setup-agent:
 	fi
 
 setup-instance:
-	@mkdir -p instances/$(INSTANCE_NAME)/home instances/$(INSTANCE_NAME)/workspace instances/$(INSTANCE_NAME)/.secrets
-	@chmod 700 instances/$(INSTANCE_NAME)/home instances/$(INSTANCE_NAME)/workspace instances/$(INSTANCE_NAME)/.secrets
-	@if [ ! -f instances/$(INSTANCE_NAME)/.env ]; then \
-		cp config/templates/.env.example instances/$(INSTANCE_NAME)/.env; \
-		printf "\n* created template environment file: instances/$(INSTANCE_NAME)/.env\n"; \
+	@mkdir -p $(INSTANCES_DIR)/$(INSTANCE_NAME)/home $(INSTANCES_DIR)/$(INSTANCE_NAME)/workspace $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets
+	@chmod 700 $(INSTANCES_DIR)/$(INSTANCE_NAME)/home $(INSTANCES_DIR)/$(INSTANCE_NAME)/workspace $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets
+	@if [ ! -f $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env ]; then \
+		cp config/templates/.env.example $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env; \
+		printf "\n* created template environment file: $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env\n"; \
 		printf "  edit this file to configure your credentials before running.\n\n"; \
 	fi
-	@chmod 600 instances/$(INSTANCE_NAME)/.secrets/*.txt 2>/dev/null || true
-	@rm -f instances/$(INSTANCE_NAME)/.secrets/*.txt
-	@touch instances/$(INSTANCE_NAME)/.secrets/github_token.txt instances/$(INSTANCE_NAME)/.secrets/gitlab_token.txt
-	@chmod 600 instances/$(INSTANCE_NAME)/.secrets/*.txt
+	@chmod 600 $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/*.txt 2>/dev/null || true
+	@rm -f $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/*.txt
+	@touch $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/github_token.txt $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/gitlab_token.txt
+	@chmod 600 $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/*.txt
 	@if [ -n "$$GITHUB_TOKEN" ]; then \
-		echo "$$GITHUB_TOKEN" > instances/$(INSTANCE_NAME)/.secrets/github_token.txt; \
+		echo "$$GITHUB_TOKEN" > $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/github_token.txt; \
 	elif [ -n "$$GH_TOKEN" ]; then \
-		echo "$$GH_TOKEN" > instances/$(INSTANCE_NAME)/.secrets/github_token.txt; \
-	elif [ -f instances/$(INSTANCE_NAME)/.env ]; then \
-		grep -E "^(GITHUB_TOKEN|GH_TOKEN)=" instances/$(INSTANCE_NAME)/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > instances/$(INSTANCE_NAME)/.secrets/github_token.txt || true; \
+		echo "$$GH_TOKEN" > $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/github_token.txt; \
+	elif [ -f $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env ]; then \
+		grep -E "^(GITHUB_TOKEN|GH_TOKEN)=" $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/github_token.txt || true; \
 	fi
 	@if [ -n "$$GITLAB_TOKEN" ]; then \
-		echo "$$GITLAB_TOKEN" > instances/$(INSTANCE_NAME)/.secrets/gitlab_token.txt; \
-	elif [ -f instances/$(INSTANCE_NAME)/.env ]; then \
-		grep -E "^GITLAB_TOKEN=" instances/$(INSTANCE_NAME)/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > instances/$(INSTANCE_NAME)/.secrets/gitlab_token.txt || true; \
+		echo "$$GITLAB_TOKEN" > $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/gitlab_token.txt; \
+	elif [ -f $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env ]; then \
+		grep -E "^GITLAB_TOKEN=" $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/gitlab_token.txt || true; \
 	fi
-	@chmod 400 instances/$(INSTANCE_NAME)/.secrets/*.txt
+	@chmod 400 $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/*.txt
 
 dind-start:
 	@if ! docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$$"; then \
@@ -91,7 +97,7 @@ dind-start:
 
 run: setup-global setup-agent setup-instance dind-start
 	@echo "starting agent $(AGENT_TYPE)..."
-	@PARANOID=$$(grep -E "^PARANOID_MODE=" instances/$(INSTANCE_NAME)/.env 2>/dev/null | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true); \
+	@PARANOID=$$(grep -E "^PARANOID_MODE=" $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env 2>/dev/null | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true); \
 	if [ "$$PARANOID" = "true" ] || [ "$$PARANOID_MODE" = "true" ]; then \
 		export BASE_IMAGE="local/agent-base:paranoid"; \
 		export BASE_IMAGE_TAG="paranoid"; \
@@ -113,12 +119,13 @@ run: setup-global setup-agent setup-instance dind-start
 		-e AGENT_MEMORY="$${AGENT_MEMORY:-0}" \
 		-e BASE_IMAGE="$$BASE_IMAGE" \
 		-e BASE_IMAGE_TAG="$$BASE_IMAGE_TAG" \
+		-e INSTANCES_DIR \
 		isolation-dind-host \
-		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/$(INSTANCE_NAME)/.env run --no-deps --rm agent $(ARGS)
+		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --rm agent $(ARGS)
 
 shell: setup-global setup-agent setup-instance dind-start
 	@echo "starting interactive shell..."
-	@PARANOID=$$(grep -E "^PARANOID_MODE=" instances/$(INSTANCE_NAME)/.env 2>/dev/null | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true); \
+	@PARANOID=$$(grep -E "^PARANOID_MODE=" $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env 2>/dev/null | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true); \
 	if [ "$$PARANOID" = "true" ] || [ "$$PARANOID_MODE" = "true" ]; then \
 		export BASE_IMAGE="local/agent-base:paranoid"; \
 		export BASE_IMAGE_TAG="paranoid"; \
@@ -140,23 +147,28 @@ shell: setup-global setup-agent setup-instance dind-start
 		-e AGENT_MEMORY="$${AGENT_MEMORY:-0}" \
 		-e BASE_IMAGE="$$BASE_IMAGE" \
 		-e BASE_IMAGE_TAG="$$BASE_IMAGE_TAG" \
+		-e INSTANCES_DIR \
 		isolation-dind-host \
-		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/$(INSTANCE_NAME)/.env run --no-deps --entrypoint /bin/sh --rm agent
+		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --entrypoint /bin/zsh --rm agent
 
 
 clean-instance:
 	@echo "cleaning credentials for $(INSTANCE_NAME)..."
-	@docker exec isolation-dind-host docker rm -f agent_instance_$(INSTANCE_NAME) 2>/dev/null || true
-	@rm -rf instances/$(INSTANCE_NAME)/.secrets
+	@container_ids=$$(docker exec isolation-dind-host docker ps -aq --filter label=isolation.instance=$(INSTANCE_NAME) 2>/dev/null); \
+	if [ -n "$$container_ids" ]; then \
+		docker exec isolation-dind-host docker rm -f $$container_ids 2>/dev/null || true; \
+	fi
+	@docker exec isolation-dind-host docker rm -f $(INSTANCE_NAME) 2>/dev/null || true
+	@rm -rf $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets
 clean-all:
 	@echo "cleaning all credentials..."
 	@docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
 	docker compose down -v 2>/dev/null || true
-	rm -rf instances/*/.secrets 2>/dev/null || true
-	rm -f instances/*/.env 2>/dev/null || true
+	rm -rf $(INSTANCES_DIR)/*/.secrets 2>/dev/null || true
+	rm -f $(INSTANCES_DIR)/*/.env 2>/dev/null || true
 
 destroy-all:
 	@echo "destroying all workspaces and containers..."
 	@docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
 	docker compose down -v 2>/dev/null || true
-	rm -rf instances/*
+	rm -rf $(INSTANCES_DIR)/*

@@ -1,36 +1,35 @@
 # syntax=docker/dockerfile:1
-FROM node:22-bookworm-slim
+FROM node:26-trixie-slim
 
 ENV NODE_ENV=production
 ENV DEBIAN_FRONTEND=noninteractive
 ENV NPM_CONFIG_LOGLEVEL=warn
 ENV HOME=/home/node
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    wget \
-    ca-certificates \
-    procps \
-    build-essential \
-    python3 \
-    python3-dev \
-    python3-venv \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN mkdir -p -m 755 /etc/apt/keyrings \
     && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y gh \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        wget \
+        ca-certificates \
+        procps \
+        build-essential \
+        python3 \
+        python3-dev \
+        python3-venv \
+        zsh \
+        vim \
+        gh \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 RUN curl -sL https://gitlab.com/gitlab-org/cli/-/releases/v1.97.0/downloads/glab_1.97.0_linux_amd64.tar.gz | tar -xz -C /usr/local bin/glab \
     && mv /usr/local/bin/glab /usr/bin/glab-original
 
 COPY src/vault/init-guard.c /tmp/init-guard.c
-RUN gcc -O2 /tmp/init-guard.c -o /usr/local/bin/init-guard \
+RUN gcc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong -Wl,-z,relro,-z,now -fPIE -pie /tmp/init-guard.c -o /usr/local/bin/init-guard \
     && chown root:root /usr/local/bin/init-guard \
     && chmod 755 /usr/local/bin/init-guard \
     && rm /tmp/init-guard.c
@@ -44,7 +43,7 @@ RUN chown root:root /usr/local/bin/glab-guard \
     && chmod 755 /usr/local/bin/glab-guard
 
 COPY src/vault/cli-vault.c /tmp/cli-vault.c
-RUN gcc -O2 /tmp/cli-vault.c -o /usr/local/bin/vault-wrapper \
+RUN gcc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong -Wl,-z,relro,-z,now -fPIE -pie /tmp/cli-vault.c -o /usr/local/bin/vault-wrapper \
     && chown root:root /usr/local/bin/vault-wrapper \
     && chmod 4755 /usr/local/bin/vault-wrapper \
     && mv /usr/bin/gh /usr/bin/gh-original \
@@ -53,13 +52,13 @@ RUN gcc -O2 /tmp/cli-vault.c -o /usr/local/bin/vault-wrapper \
     && rm /tmp/cli-vault.c
 
 COPY src/sandbox/fs-vault.c /tmp/fs-vault.c
-RUN gcc -O2 -fPIC -shared /tmp/fs-vault.c -o /usr/local/lib/fs_vault.so -ldl \
+RUN gcc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong -Wl,-z,relro,-z,now -fPIC -shared /tmp/fs-vault.c -o /usr/local/lib/fs_vault.so -ldl \
     && chown root:root /usr/local/lib/fs_vault.so \
     && chmod 755 /usr/local/lib/fs_vault.so \
     && rm /tmp/fs-vault.c
 
 COPY src/sandbox/net-proxy.c /tmp/net-proxy.c
-RUN gcc -O2 -fPIC -shared /tmp/net-proxy.c -o /usr/local/lib/net_proxy.so -ldl \
+RUN gcc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong -Wl,-z,relro,-z,now -fPIC -shared /tmp/net-proxy.c -o /usr/local/lib/net_proxy.so -ldl \
     && chown root:root /usr/local/lib/net_proxy.so \
     && chmod 755 /usr/local/lib/net_proxy.so \
     && rm /tmp/net-proxy.c
@@ -79,7 +78,22 @@ exec /usr/bin/git "$@"\n' > /usr/local/bin/git \
     && chmod +x /usr/local/bin/git
 
 RUN git config --system credential.https://github.com.helper "" \
-    && git config --system credential.https://github.com.helper "!/usr/local/bin/gh auth git-credential"
+    && git config --system credential.https://github.com.helper "!/usr/local/bin/gh auth git-credential" \
+    && git config --system credential.https://gitlab.com.helper "" \
+    && git config --system credential.https://gitlab.com.helper "!/usr/local/bin/glab auth git-credential"
+
+# Configure default shell for node user
+RUN chsh -s /bin/zsh node && chsh -s /bin/zsh root && usermod -s /bin/zsh node
+
+# Clone and install dotfiles for node user
+USER node
+RUN UNATTENDED=yes CHSH=no RUNZSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
+    && rm -rf /home/node/.oh-my-zsh/.git \
+    && git clone --depth=1 https://github.com/gni/dotfiles.git /home/node/dotfiles \
+    && cd /home/node/dotfiles \
+    && yes y | ./install.sh || true \
+    && rm -rf /home/node/dotfiles/.git
+USER root
 
 RUN mkdir -p /workspace \
     && chown -R node:node /workspace
@@ -87,6 +101,9 @@ RUN mkdir -p /workspace \
 RUN echo 'export LD_PRELOAD="/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy.so"' >> /etc/profile \
     && echo 'export MESH_PROXY_IP="172.20.0.53"' >> /etc/profile \
     && echo 'export LD_PRELOAD="/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy.so"' >> /etc/bash.bashrc \
-    && echo 'export MESH_PROXY_IP="172.20.0.53"' >> /etc/bash.bashrc
+    && echo 'export MESH_PROXY_IP="172.20.0.53"' >> /etc/bash.bashrc \
+    && mkdir -p /etc/zsh \
+    && echo 'export LD_PRELOAD="/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy.so"' >> /etc/zsh/zshrc \
+    && echo 'export MESH_PROXY_IP="172.20.0.53"' >> /etc/zsh/zshrc
 
 WORKDIR /workspace

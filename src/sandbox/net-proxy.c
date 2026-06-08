@@ -8,11 +8,17 @@
 
 static int (*real_connect)(int, const struct sockaddr *, socklen_t) = NULL;
 
-int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
-    if (!real_connect) {
-        real_connect = dlsym(RTLD_NEXT, "connect");
-    }
+static void init_hooks() {
+    if (real_connect) return;
+    real_connect = dlsym(RTLD_NEXT, "connect");
+}
 
+static void __attribute__((constructor)) eager_init(void) {
+    init_hooks();
+}
+
+int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+    init_hooks();
     if (addr && addr->sa_family == AF_INET) {
         int type = 0;
         socklen_t length = sizeof(type);

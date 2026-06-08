@@ -16,9 +16,13 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 COPY agents/blueprints/${AGENT_TYPE}/install.sh /tmp/install.sh
 
-RUN chmod +x /tmp/install.sh && NODE_OPTIONS="" /tmp/install.sh && rm /tmp/install.sh
+RUN chmod +x /tmp/install.sh \
+    && NODE_OPTIONS="" /tmp/install.sh \
+    && rm -rf /tmp/install.sh \
+    && if command -v npm >/dev/null 2>&1; then npm cache clean --force && rm -rf /root/.npm /home/node/.npm; fi \
+    && rm -rf /root/.cache /home/node/.cache /tmp/*
 
 ENV PATH="/home/node/.local/bin:${PATH}"
 
-ENTRYPOINT ["/usr/local/bin/init-guard", "sh", "/usr/local/bin/agent-run.sh"]
-CMD []
+ENTRYPOINT ["/usr/local/bin/init-guard"]
+CMD ["sh", "/usr/local/bin/agent-run.sh"]

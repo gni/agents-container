@@ -6,13 +6,14 @@ export AGENT_TYPE="${AGENT_TYPE:-pi}"
 export INSTANCE_NAME="${INSTANCE_NAME:-pi_session}"
 
 # Ensure instance directories and dummy files exist to prevent docker compose validation errors
-mkdir -p /app/instances/"$INSTANCE_NAME"/.secrets
-touch /app/instances/"$INSTANCE_NAME"/.secrets/github_token.txt
-touch /app/instances/"$INSTANCE_NAME"/.secrets/gitlab_token.txt
-chmod 600 /app/instances/"$INSTANCE_NAME"/.secrets/*.txt
+INSTANCES_DIR="${INSTANCES_DIR:-instances}"
+mkdir -p /app/"$INSTANCES_DIR"/"$INSTANCE_NAME"/.secrets
+touch /app/"$INSTANCES_DIR"/"$INSTANCE_NAME"/.secrets/github_token.txt
+touch /app/"$INSTANCES_DIR"/"$INSTANCE_NAME"/.secrets/gitlab_token.txt
+chmod 600 /app/"$INSTANCES_DIR"/"$INSTANCE_NAME"/.secrets/*.txt
 
 # Fix ownership so files are owned by the host user instead of root
-chown -R $(stat -c "%u:%g" /app) /app/instances/"$INSTANCE_NAME"
+chown -R $(stat -c "%u:%g" /app) /app/"$INSTANCES_DIR"/"$INSTANCE_NAME"
 
 echo "dind: configuring public nameservers..."
 echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" > /etc/resolv.conf
@@ -32,6 +33,7 @@ if [ "$GVISOR_DEBUG" = "true" ]; then
         "--platform=ptrace",
         "--debug",
         "--strace",
+        "--strace-syscalls=execve,connect,socket,clone,ptrace",
         "--debug-log=/var/log/gvisor/%ID%/runsc.log.%%COMMAND%%"
       ]
     },
@@ -108,6 +110,12 @@ if [ ! -f /app/config/ottergate/certs/ca.crt ]; then
     # Fix ownership of config certificates so host user can access them
     chown -R $(stat -c "%u:%g" /app) /app/config/ottergate/certs 2>/dev/null || true
 fi
+
+# Ensure the Ottergate CA certificate is available in custom certs for the agent to trust it
+cp /app/config/ottergate/certs/ca.crt /app/config/ottergate/certs/custom/ottergate-ca.crt 2>/dev/null || true
+chmod 644 /app/config/ottergate/certs/custom/ottergate-ca.crt 2>/dev/null || true
+chown $(stat -c "%u:%g" /app) /app/config/ottergate/certs/custom/ottergate-ca.crt 2>/dev/null || true
+
 
 if [ ! -f /app/config/ottergate/resolv.conf ]; then
     echo "dind: creating resolv.conf..."

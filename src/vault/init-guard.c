@@ -43,12 +43,47 @@ void copy_secure_token(const char *src_dir, const char *filename, const char *ds
     
     close(fd_in);
     close(fd_out);
-    chown(dst_path, 0, 0);
+    if (chown(dst_path, 0, 0) != 0) {
+        // Ignore failure
+    }
+}
+
+int is_git_push_command(char *cmdline, size_t n) {
+    char *ptr = cmdline;
+    // Skip argv[0]
+    ptr += strlen(ptr) + 1;
+    while (ptr < cmdline + n) {
+        if (ptr[0] == '-') {
+            if (strcmp(ptr, "-c") == 0 || strcmp(ptr, "-C") == 0) {
+                // Skip option and value
+                ptr += strlen(ptr) + 1;
+                if (ptr < cmdline + n) {
+                    ptr += strlen(ptr) + 1;
+                }
+            } else if (strncmp(ptr, "--git-dir", 9) == 0 || strncmp(ptr, "--work-tree", 11) == 0 || strncmp(ptr, "--namespace", 11) == 0 || strncmp(ptr, "--exec-path", 11) == 0) {
+                if (strchr(ptr, '=') != NULL) {
+                    ptr += strlen(ptr) + 1;
+                } else {
+                    ptr += strlen(ptr) + 1;
+                    if (ptr < cmdline + n) {
+                        ptr += strlen(ptr) + 1;
+                    }
+                }
+            } else {
+                ptr += strlen(ptr) + 1;
+            }
+        } else {
+            // This is the git command
+            return (strcmp(ptr, "push") == 0);
+        }
+    }
+    return 0;
 }
 
 int validate_process_chain(pid_t client_pid, int is_git_helper) {
     pid_t cur_pid = client_pid;
     int legit_git_op = 0;
+    int blocked = 0;
     
     // Ensure the immediate client is exactly vault-wrapper
     char client_exe[512];
@@ -85,15 +120,25 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
             strcmp(exe_path, "/bin/sh") == 0 ||
             strcmp(exe_path, "/usr/bin/dash") == 0 ||
             strcmp(exe_path, "/bin/dash") == 0 ||
+            strcmp(exe_path, "/usr/bin/zsh") == 0 ||
+            strcmp(exe_path, "/bin/zsh") == 0 ||
             strcmp(exe_path, "/usr/bin/gh-original") == 0 ||
             strcmp(exe_path, "/usr/local/bin/vault-wrapper") == 0 ||
             strcmp(exe_path, "/usr/bin/node") == 0 ||
             strcmp(exe_path, "/usr/local/bin/node") == 0 ||
-            strncmp(exe_name, "python", 6) == 0 ||
-            strncmp(exe_name, "ruby", 4) == 0 ||
-            strncmp(exe_name, "perl", 4) == 0 ||
-            strncmp(exe_name, "php", 3) == 0 ||
-            strncmp(exe_name, "java", 4) == 0) {
+            strcmp(exe_path, "/usr/bin/python3") == 0 ||
+            strcmp(exe_path, "/usr/bin/python") == 0 ||
+            strcmp(exe_path, "/usr/bin/ruby") == 0 ||
+            strcmp(exe_path, "/usr/bin/perl") == 0 ||
+            strcmp(exe_path, "/usr/bin/php") == 0 ||
+            strcmp(exe_path, "/usr/bin/java") == 0 ||
+            strcmp(exe_name, "agy") == 0 ||
+            strcmp(exe_name, "claude") == 0 ||
+            strcmp(exe_name, "codex") == 0 ||
+            strcmp(exe_name, "gemini") == 0 ||
+            strcmp(exe_name, "hermes") == 0 ||
+            strcmp(exe_name, "opencode") == 0 ||
+            strcmp(exe_name, "pi") == 0) {
             allowed = 1;
         }
         
@@ -101,13 +146,15 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
             return 0;
         }
         
-        // If bash/sh/dash, check cmdline for metacharacters
+        // If bash/sh/dash/zsh, check cmdline for metacharacters
         if (strcmp(exe_path, "/usr/bin/bash") == 0 ||
             strcmp(exe_path, "/bin/bash") == 0 ||
             strcmp(exe_path, "/usr/bin/sh") == 0 ||
             strcmp(exe_path, "/bin/sh") == 0 ||
             strcmp(exe_path, "/usr/bin/dash") == 0 ||
-            strcmp(exe_path, "/bin/dash") == 0) {
+            strcmp(exe_path, "/bin/dash") == 0 ||
+            strcmp(exe_path, "/usr/bin/zsh") == 0 ||
+            strcmp(exe_path, "/bin/zsh") == 0) {
             char cmdline_path[128];
             snprintf(cmdline_path, sizeof(cmdline_path), "/proc/%d/cmdline", cur_pid);
             FILE *f = fopen(cmdline_path, "r");
@@ -133,6 +180,14 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
         if (strcmp(exe_path, "/usr/bin/git") == 0 ||
             strcmp(exe_path, "/usr/local/bin/git") == 0 ||
             strstr(exe_path, "/git-core/git") != NULL) {
+            
+            // Check if this is the main git process (ends with "/git")
+            size_t exe_len = strlen(exe_path);
+            int is_main_git = 0;
+            if (exe_len >= 4 && strcmp(exe_path + exe_len - 4, "/git") == 0) {
+                is_main_git = 1;
+            }
+
             char cmdline_path[128];
             snprintf(cmdline_path, sizeof(cmdline_path), "/proc/%d/cmdline", cur_pid);
             FILE *f = fopen(cmdline_path, "r");
@@ -155,6 +210,16 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
                             break;
                         }
                         ptr += strlen(ptr) + 1;
+                    }
+
+                    if (is_main_git) {
+                        if (is_git_push_command(cmdline, n)) {
+                            const char *allow_push_env = getenv("ALLOW_PUSH");
+                            int allow_push = (allow_push_env && strcmp(allow_push_env, "true") == 0);
+                            if (!allow_push) {
+                                blocked = 1;
+                            }
+                        }
                     }
                 }
             }
@@ -182,9 +247,9 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
     }
     
     if (is_git_helper) {
-        return legit_git_op;
+        return legit_git_op && !blocked;
     }
-    return 1;
+    return !blocked;
 }
 
 void run_vault_daemon() {
@@ -270,10 +335,38 @@ void run_vault_daemon() {
         }
 
         if (found) {
-            write(client_fd, token, strlen(token));
+            if (write(client_fd, token, strlen(token)) != (ssize_t)strlen(token)) {
+                // Ignore failure
+            }
         }
         close(client_fd);
     }
+}
+
+void configure_git_helper(const char *hosts_env, const char *helper_cmd) {
+    if (!hosts_env) return;
+    char *hosts = strdup(hosts_env);
+    if (!hosts) return;
+    char *token = strtok(hosts, ",");
+    while (token != NULL) {
+        while (*token == ' ' || *token == '\t') token++;
+        char *end = token + strlen(token) - 1;
+        while (end > token && (*end == ' ' || *end == '\t')) {
+            *end = '\0';
+            end--;
+        }
+        if (strlen(token) > 0) {
+            char cmd[512];
+            snprintf(cmd, sizeof(cmd), "git config --system credential.https://%s.helper \"\" 2>/dev/null || true", token);
+            int res1 = system(cmd);
+            (void)res1;
+            snprintf(cmd, sizeof(cmd), "git config --system credential.https://%s.helper \"%s\" 2>/dev/null || true", token, helper_cmd);
+            int res2 = system(cmd);
+            (void)res2;
+        }
+        token = strtok(NULL, ",");
+    }
+    free(hosts);
 }
 
 int main(int argc, char **argv) {
@@ -283,7 +376,9 @@ int main(int argc, char **argv) {
 
     mkdir("/vault", 0711);
     chmod("/vault", 0711);
-    chown("/vault", 0, 0);
+    if (chown("/vault", 0, 0) != 0) {
+        // Ignore failure
+    }
 
     // Import custom CA certificates if they exist
     if (access("/usr/local/share/ca-certificates/custom", F_OK) == 0) {
@@ -293,6 +388,15 @@ int main(int argc, char **argv) {
         setenv("REQUESTS_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt", 1);
         setenv("SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt", 1);
     }
+    
+    const char *gh_hosts = getenv("GITHUB_HOSTS");
+    if (!gh_hosts) gh_hosts = "github.com,api.github.com";
+    configure_git_helper(gh_hosts, "!/usr/local/bin/gh auth git-credential");
+
+    const char *gl_hosts = getenv("GITLAB_HOSTS");
+    if (!gl_hosts) gl_hosts = "gitlab.com";
+    configure_git_helper(gl_hosts, "!/usr/local/bin/glab auth git-credential");
+
     setenv("LD_PRELOAD", "/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy.so", 1);
     setenv("MESH_PROXY_IP", "172.20.0.53", 1);
     print_status(" *", "verifying certificates", "\033[32mdone\033[0m");
@@ -340,12 +444,17 @@ int main(int argc, char **argv) {
     }
     print_status(" *", "starting vault daemon", "\033[32mdone\033[0m");
 
-    // Fix ownership of home directory and workspace before dropping privileges
     char chown_cmd[512];
     snprintf(chown_cmd, sizeof(chown_cmd), "chown -R %d:%d /home/node /workspace 2>/dev/null", target_uid, target_gid);
     int chown_res = system(chown_cmd);
     (void)chown_res;
     print_status(" *", "setting permissions", "\033[32mdone\033[0m");
+
+    unsetenv("GITHUB_TOKEN");
+    unsetenv("GH_TOKEN");
+    unsetenv("GITLAB_TOKEN");
+    unsetenv("GLAB_TOKEN");
+    unsetenv("GL_TOKEN");
 
     if (setgroups(1, &target_gid) != 0) return 1;
     if (setresgid(target_gid, target_gid, target_gid) != 0) return 1;

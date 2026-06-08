@@ -1,7 +1,7 @@
 FROM docker:29-dind
 
 # Install runtime dependencies (including bash, crun, iptables, etc.)
-RUN apk add --no-cache bash curl crun libcap xz python3 nodejs openssl
+RUN apk add --no-cache bash curl crun libcap xz python3 nodejs openssl ctop
 
 # Force legacy iptables to prevent nftables initialization errors in nested containers
 RUN ln -sf /sbin/iptables-legacy /sbin/iptables && \

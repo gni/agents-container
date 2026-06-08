@@ -47,7 +47,9 @@ services:
         AGENT_TYPE: ${AGENT_TYPE}
         BASE_IMAGE: ${BASE_IMAGE:-local/agent-base:latest}
     image: local/agent-${AGENT_TYPE}-agent:${BASE_IMAGE_TAG:-latest}
-    container_name: agent_instance_${INSTANCE_NAME}
+    hostname: ${INSTANCE_NAME}
+    labels:
+      - "isolation.instance=${INSTANCE_NAME}"
     runtime: runsc
     cap_add:
       - SYS_PTRACE
@@ -60,7 +62,7 @@ services:
       - 172.20.0.53
 
     env_file:
-      - /app/instances/${INSTANCE_NAME}/.env
+      - /app/${INSTANCES_DIR:-instances}/${INSTANCE_NAME}/.env
 
     environment:
       - HOME=/home/node
@@ -82,11 +84,12 @@ services:
 
     volumes:
       - /app/config/ottergate/resolv.conf:/etc/resolv.conf:ro
-      - /app/instances/${INSTANCE_NAME}/workspace:/workspace
-      - /app/instances/${INSTANCE_NAME}/home:/home/node/
+      - /app/config/sandbox/blocked_paths.txt:/etc/sandbox/blocked_paths.txt:ro
+      - /app/${INSTANCES_DIR:-instances}/${INSTANCE_NAME}/workspace:/workspace
+      - /app/${INSTANCES_DIR:-instances}/${INSTANCE_NAME}/home:/home/node/
       - /app/agents/blueprints/${AGENT_TYPE}/run.sh:/usr/local/bin/agent-run.sh:ro
       - /app/config/ottergate/certs/custom:/usr/local/share/ca-certificates/custom:ro
-      - /app/shared/skills:/workspace/skills:ro
+      - /app/shared/skills:/home/node/agent/skills:ro
 
     tmpfs:
       - /tmp:noexec,nodev,nosuid,mode=1777
@@ -118,6 +121,6 @@ networks:
 
 secrets:
   github_token:
-    file: /app/instances/${INSTANCE_NAME}/.secrets/github_token.txt
+    file: /app/${INSTANCES_DIR:-instances}/${INSTANCE_NAME}/.secrets/github_token.txt
   gitlab_token:
-    file: /app/instances/${INSTANCE_NAME}/.secrets/gitlab_token.txt
+    file: /app/${INSTANCES_DIR:-instances}/${INSTANCE_NAME}/.secrets/gitlab_token.txt

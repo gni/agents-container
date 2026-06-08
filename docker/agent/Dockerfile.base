@@ -1,36 +1,49 @@
 # syntax=docker/dockerfile:1
-FROM node:22-bookworm-slim
+FROM node:26-trixie-slim
 
 ENV NODE_ENV=production
 ENV DEBIAN_FRONTEND=noninteractive
 ENV NPM_CONFIG_LOGLEVEL=warn
 ENV HOME=/home/node
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    wget \
-    ca-certificates \
-    procps \
-    build-essential \
-    python3 \
-    python3-dev \
-    python3-venv \
-    && rm -rf /var/lib/apt/lists/*
-
 RUN mkdir -p -m 755 /etc/apt/keyrings \
     && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y gh \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        wget \
+        ca-certificates \
+        procps \
+        build-essential \
+        python3 \
+        python3-dev \
+        python3-venv \
+        zsh \
+        vim \
+        gh \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 RUN curl -sL https://gitlab.com/gitlab-org/cli/-/releases/v1.97.0/downloads/glab_1.97.0_linux_amd64.tar.gz | tar -xz -C /usr/local bin/glab
 
 # Create a no-op/bypass init-guard script to satisfy agent entrypoint
 RUN printf '#!/bin/sh\nexec "$@"\n' > /usr/local/bin/init-guard \
     && chmod +x /usr/local/bin/init-guard
+
+# Configure default shell for node user
+RUN chsh -s /bin/zsh node && chsh -s /bin/zsh root && usermod -s /bin/zsh node
+
+# Clone and install dotfiles for node user
+USER node
+RUN UNATTENDED=yes CHSH=no RUNZSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
+    && rm -rf /home/node/.oh-my-zsh/.git \
+    && git clone --depth=1 https://github.com/gni/dotfiles.git /home/node/dotfiles \
+    && cd /home/node/dotfiles \
+    && yes y | ./install.sh || true \
+    && rm -rf /home/node/dotfiles/.git
+USER root
+
 
 RUN mkdir -p /workspace \
     && chown -R node:node /workspace

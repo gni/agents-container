@@ -20,6 +20,8 @@
   "firewall": {
     "defaultPolicy": "deny",
     "allowlist_domains": [
+      "*.google.com",
+      "google.com",
       "*.openai.com",
       "openai.com",
       "*.anthropic.com",
@@ -36,7 +38,16 @@
       "*.npmjs.org",
       "registry.npmjs.org",
       "*.pypi.org",
+      "pypi.org",
       "files.pythonhosted.org",
+      "*.pythonhosted.org",
+      "pythonhosted.org",
+      "rubygems.org",
+      "*.rubygems.org",
+      "crates.io",
+      "sh.rustup.rs",
+      "static.rust-lang.org",
+      "*.crates.io",
       "*.github.com",
       "github.com",
       "*.githubusercontent.com",
@@ -51,7 +62,13 @@
       "*.googleusercontent.com",
       "*.githubcopilot.com",
       "*.claude.com",
-      "brain.mlops"
+      "brain.mlops",
+      "opencode.ai",
+      "google.golang.org",
+      "gopkg.in",
+      "golang.org",
+      "*.golang.org",
+      "go.dev"
     ],
     "blocklist_domains": [
       "*.malicious-domain.example",
@@ -84,7 +101,7 @@
     "enabled": true,
     "port": 8080,
     "socketPath": "",
-    "apiKey": "0eb091d8dbced716a0fdc1490d6f85aea2bb616b31ce38349aa79a0905a7ba4e",
+    "apiKey": null,
     "tls": null
   },
   "hosts": {
@@ -100,7 +117,7 @@
       "records": [
         {
           "type": "A",
-          "address": "172.53.0.53"
+          "address": "172.20.0.53"
         }
       ],
       "tls_proxy": {

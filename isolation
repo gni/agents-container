@@ -5,6 +5,14 @@ set -e
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
+# Load root .env if it exists
+if [ -f .env ]; then
+    export $(grep -v '^#' .env | xargs) 2>/dev/null || true
+fi
+
+# Directory where workspace instances are stored (default: instances)
+INSTANCES_DIR="${INSTANCES_DIR:-instances}"
+
 # Color Codes
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -32,6 +40,9 @@ show_usage() {
     echo -e "  ${GREEN}restart${RESET}                           restart proxy and update network rules"
     echo -e "  ${GREEN}status${RESET}                            check daemon and sandboxes status"
     echo -e "  ${GREEN}stats${RESET}                             stream real-time container resource stats"
+    echo -e "  ${GREEN}ctop${RESET}                              launch container metrics dashboard (ctop)"
+    echo -e "  ${GREEN}space${RESET}                             check disk space usage of agent components"
+    echo -e "  ${GREEN}btop${RESET}                              launch interactive system resource monitor"
     echo -e "  ${GREEN}list${RESET}                              list running sandboxes and workspaces"
     echo -e "  ${GREEN}shell${RESET} <agent> [instance]           spawn an interactive sandbox shell"
     echo -e "  ${GREEN}run${RESET} <agent> [instance]             run sandbox in headless mode"
@@ -115,35 +126,39 @@ ensure_dind_healthy() {
 provision_instance() {
     local agent=$1
     local inst=$2
-    mkdir -p instances/"$inst"/home instances/"$inst"/workspace instances/"$inst"/.secrets
-    chmod 700 instances/"$inst"/home instances/"$inst"/workspace instances/"$inst"/.secrets
+    mkdir -p "$INSTANCES_DIR"/"$inst"/home "$INSTANCES_DIR"/"$inst"/workspace "$INSTANCES_DIR"/"$inst"/.secrets
+    chmod 700 "$INSTANCES_DIR"/"$inst"/home "$INSTANCES_DIR"/"$inst"/workspace "$INSTANCES_DIR"/"$inst"/.secrets
 
-    if [ ! -f instances/"$inst"/.env ]; then
+    if [ ! -f "$INSTANCES_DIR"/"$inst"/.env ]; then
         if [ -f config/templates/.env.example ]; then
-            cp config/templates/.env.example instances/"$inst"/.env
+            cp config/templates/.env.example "$INSTANCES_DIR"/"$inst"/.env
         else
-            printf "GITHUB_TOKEN=your_token\nGITLAB_TOKEN=your_token\nGIT_NAME=\"Your Name\"\nGIT_EMAIL=\"your.email@example.com\"\n" > instances/"$inst"/.env
+            printf "GITHUB_TOKEN=your_token\nGITLAB_TOKEN=your_token\nGIT_NAME=\"Your Name\"\nGIT_EMAIL=\"your.email@example.com\"\n" > "$INSTANCES_DIR"/"$inst"/.env
         fi
     fi
 
     # Create dummy secret files to allow bind mounts
-    touch instances/"$inst"/.secrets/github_token.txt instances/"$inst"/.secrets/gitlab_token.txt
-    chmod 600 instances/"$inst"/.secrets/*.txt
+    touch "$INSTANCES_DIR"/"$inst"/.secrets/github_token.txt "$INSTANCES_DIR"/"$inst"/.secrets/gitlab_token.txt
+    chmod 600 "$INSTANCES_DIR"/"$inst"/.secrets/*.txt
 
     # Extract tokens from .env into secret files if present
-    if [ -f instances/"$inst"/.env ]; then
-        grep -E "^(GITHUB_TOKEN|GH_TOKEN)=" instances/"$inst"/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > instances/"$inst"/.secrets/github_token.txt || true
-        grep -E "^GITLAB_TOKEN=" instances/"$inst"/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > instances/"$inst"/.secrets/gitlab_token.txt || true
+    if [ -f "$INSTANCES_DIR"/"$inst"/.env ]; then
+        grep -E "^(GITHUB_TOKEN|GH_TOKEN)=" "$INSTANCES_DIR"/"$inst"/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > "$INSTANCES_DIR"/"$inst"/.secrets/github_token.txt || true
+        grep -E "^GITLAB_TOKEN=" "$INSTANCES_DIR"/"$inst"/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" > "$INSTANCES_DIR"/"$inst"/.secrets/gitlab_token.txt || true
     fi
-    chmod 400 instances/"$inst"/.secrets/*.txt
+    chmod 400 "$INSTANCES_DIR"/"$inst"/.secrets/*.txt
 }
 
 # Determine paranoid mode and select base image
 get_base_image_config() {
     local inst=$1
     local paranoid=false
-    if [ -f "instances/$inst/.env" ]; then
-        if grep -qE "^PARANOID_MODE=true" "instances/$inst/.env"; then
+    if [ -f "$INSTANCES_DIR/$inst/.env" ]; then
+        if grep -qE "^PARANOID_MODE=true" "$INSTANCES_DIR/$inst/.env"; then
+            paranoid=true
+        fi
+    elif [ -f "config/templates/.env.example" ]; then
+        if grep -qE "^PARANOID_MODE=true" "config/templates/.env.example"; then
             paranoid=true
         fi
     fi
@@ -241,6 +256,9 @@ case "$COMMAND" in
         
         AGENT=${AGENT:-pi}
         INSTANCE=${INSTANCE:-${AGENT}_session}
+        if [ ${#INSTANCE} -eq 1 ]; then
+            INSTANCE="${INSTANCE}_"
+        fi
 
         if [ ! -d "agents/blueprints/$AGENT" ]; then
             echo -e "error: blueprint '${AGENT}' does not exist"
@@ -262,10 +280,10 @@ case "$COMMAND" in
         get_base_image_config "$INSTANCE"
 
         # Load resource limits from the instance's .env file if present and not overridden by CLI
-        if [ -f "instances/$INSTANCE/.env" ]; then
-            [ -z "$CPUS_LIMIT" ] && CPUS_LIMIT=$(grep -E "^AGENT_CPUS=" instances/"$INSTANCE"/.env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
-            [ -z "$MEMORY_LIMIT" ] && MEMORY_LIMIT=$(grep -E "^(AGENT_MEMORY|MEMORY_LIMIT)=" instances/"$INSTANCE"/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
-            [ -z "$GPUS_LIMIT" ] && GPUS_LIMIT=$(grep -E "^AGENT_GPUS=" instances/"$INSTANCE"/.env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+        if [ -f "$INSTANCES_DIR/$INSTANCE/.env" ]; then
+            [ -z "$CPUS_LIMIT" ] && CPUS_LIMIT=$(grep -E "^AGENT_CPUS=" "$INSTANCES_DIR"/"$INSTANCE"/.env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+            [ -z "$MEMORY_LIMIT" ] && MEMORY_LIMIT=$(grep -E "^(AGENT_MEMORY|MEMORY_LIMIT)=" "$INSTANCES_DIR"/"$INSTANCE"/.env | head -n 1 | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+            [ -z "$GPUS_LIMIT" ] && GPUS_LIMIT=$(grep -E "^AGENT_GPUS=" "$INSTANCES_DIR"/"$INSTANCE"/.env | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
         fi
 
         LIMITS_OPT=""
@@ -274,8 +292,16 @@ case "$COMMAND" in
         [ -n "$GPUS_LIMIT" ] && LIMITS_OPT="$LIMITS_OPT --gpus=$GPUS_LIMIT"
 
         ENTRYPOINT_OPT=""
+        SHELL_CMD=""
         if [ "$COMMAND" = "shell" ]; then
-            ENTRYPOINT_OPT="--entrypoint /bin/sh"
+            RUNNING_CONTAINER=$(docker exec isolation-dind-host docker ps --filter label=isolation.instance="${INSTANCE}" --filter status=running -q || true)
+            if [ -n "$RUNNING_CONTAINER" ]; then
+                CONTAINER_ID=$(echo "$RUNNING_CONTAINER" | head -n 1)
+                echo -e "attaching to running sandbox ${INSTANCE}..."
+                docker exec -it isolation-dind-host docker exec -it -u node "${CONTAINER_ID}" /bin/zsh
+                exit 0
+            fi
+            SHELL_CMD="/bin/zsh"
             echo -e "starting interactive shell..."
         else
             echo -e "starting agent..."
@@ -310,8 +336,9 @@ case "$COMMAND" in
             -e TERM="${TERM:-xterm-256color}" \
             -e AGENT_CPUS="${CPUS_LIMIT:-0}" \
             -e AGENT_MEMORY="${MEMORY_LIMIT:-0}" \
+            -e INSTANCES_DIR \
             isolation-dind-host \
-            docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/instances/"$INSTANCE"/.env run $ENTRYPOINT_OPT --no-deps --rm agent
+            docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/"$INSTANCES_DIR"/"$INSTANCE"/.env run $ENTRYPOINT_OPT --no-deps --name ${INSTANCE_NAME} --rm agent $SHELL_CMD
         ;;
     logs)
         LAYER=$1
@@ -321,23 +348,20 @@ case "$COMMAND" in
                 docker logs "$@" isolation-dind-host
                 ;;
             proxy)
-                docker exec -it isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml logs "$@" ottergate
+                docker exec -it isolation-dind-host docker logs "$@" isolation-ottergate-1
                 ;;
             agent)
                 INST=$1
                 shift || true
-                AGENT_T=${1:-pi}
-                shift || true
                 if [ -z "$INST" ]; then
                     echo -e "error: specify instance name"
-                    echo -e "usage: ./isolation logs agent <instance> [agent]"
+                    echo -e "usage: ./isolation logs agent <instance>"
                     exit 1
                 fi
-                docker exec -it \
-                    -e AGENT_TYPE="$AGENT_T" \
-                    -e INSTANCE_NAME="$INST" \
-                    isolation-dind-host \
-                    docker compose -p isolation -f /app/docker/docker-compose.inner.yml logs "$@" agent
+                if [ ${#INST} -eq 1 ]; then
+                    INST="${INST}_"
+                fi
+                docker exec -it isolation-dind-host docker logs "$@" "$INST"
                 ;;
             gvisor)
                 echo -e "gvisor sandbox logs:"
@@ -363,14 +387,14 @@ case "$COMMAND" in
     list)
         echo -e "running sandboxes:"
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            ps_out=$(docker exec isolation-dind-host docker ps --filter name=agent_instance_ --format '{{.Names}}	{{.Status}}	{{.Image}}' 2>/dev/null || true)
+            ps_out=$(docker exec isolation-dind-host docker ps --filter label=isolation.instance --format '{{.Names}}	{{.Status}}	{{.Image}}	{{.Label "isolation.instance"}}' 2>/dev/null || true)
             
             printf "  \033[1;30m%-36s %-20s %-32s\033[0m\n" "name" "status" "image"
             printf "  \033[1;30m----------------------------------------------------------------------------------------\033[0m\n"
             
             if [ -n "$ps_out" ]; then
-                echo "$ps_out" | while IFS=$'\t' read -r name status image; do
-                    short_name=${name#agent_instance_}
+                echo "$ps_out" | while IFS=$'\t' read -r name status image inst_label; do
+                    short_name=${inst_label:-${name#agent_instance_}}
                     short_name=${short_name,,}
                     status=${status,,}
                     image=${image,,}
@@ -388,8 +412,8 @@ case "$COMMAND" in
         printf "  \033[1;30m%-36s %-12s %-12s\033[0m\n" "name" "size" "secrets"
         printf "  \033[1;30m------------------------------------------------------------\033[0m\n"
         
-        if [ -d instances ] && [ "$(ls -A instances)" ]; then
-            for d in instances/*; do
+        if [ -d "$INSTANCES_DIR" ] && [ "$(ls -A "$INSTANCES_DIR" 2>/dev/null)" ]; then
+            for d in "$INSTANCES_DIR"/*; do
                 if [ -d "$d" ]; then
                     inst_name=$(basename "$d")
                     inst_name=${inst_name,,}
@@ -427,12 +451,19 @@ case "$COMMAND" in
             echo -e "error: specify instance name"
             exit 1
         fi
+        if [ ${#INST} -eq 1 ]; then
+            INST="${INST}_"
+        fi
         echo -e "cleaning credentials for $INST..."
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec isolation-dind-host docker rm -f agent_instance_"$INST" 2>/dev/null || true
+            container_ids=$(docker exec isolation-dind-host docker ps -aq --filter label=isolation.instance="$INST" 2>/dev/null)
+            if [ -n "$container_ids" ]; then
+                docker exec isolation-dind-host docker rm -f $container_ids 2>/dev/null || true
+            fi
+            docker exec isolation-dind-host docker rm -f "$INST" 2>/dev/null || true
         fi
-        rm -rf instances/"$INST"/.secrets
-        rm -f instances/"$INST"/.env
+        rm -rf "$INSTANCES_DIR"/"$INST"/.secrets
+        rm -f "$INSTANCES_DIR"/"$INST"/.env
         echo -e "cleaned."
         ;;
     destroy)
@@ -441,11 +472,18 @@ case "$COMMAND" in
             echo -e "error: specify instance name"
             exit 1
         fi
+        if [ ${#INST} -eq 1 ]; then
+            INST="${INST}_"
+        fi
         echo -e "destroying $INST (this will delete workspace files)..."
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec isolation-dind-host docker rm -f agent_instance_"$INST" 2>/dev/null || true
+            container_ids=$(docker exec isolation-dind-host docker ps -aq --filter label=isolation.instance="$INST" 2>/dev/null)
+            if [ -n "$container_ids" ]; then
+                docker exec isolation-dind-host docker rm -f $container_ids 2>/dev/null || true
+            fi
+            docker exec isolation-dind-host docker rm -f "$INST" 2>/dev/null || true
         fi
-        rm -rf instances/"$INST"
+        rm -rf "$INSTANCES_DIR"/"$INST"
         echo -e "destroyed."
         ;;
     clean-all)
@@ -453,8 +491,8 @@ case "$COMMAND" in
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
             docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
         fi
-        rm -rf instances/*/.secrets
-        rm -f instances/*/.env
+        rm -rf "$INSTANCES_DIR"/*/.secrets
+        rm -f "$INSTANCES_DIR"/*/.env
         echo -e "cleaned all."
         ;;
     destroy-all)
@@ -463,15 +501,18 @@ case "$COMMAND" in
             docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
         fi
         docker compose down -v 2>/dev/null || true
-        rm -rf instances/*
+        rm -rf "$INSTANCES_DIR"/*
         echo -e "destroyed all."
         ;;
     build)
         AGENT=""
         FORCE_BASE=false
+        NO_CACHE_OPT=""
         for arg in "$@"; do
             if [ "$arg" = "--base" ] || [ "$arg" = "-b" ]; then
                 FORCE_BASE=true
+            elif [ "$arg" = "--no-cache" ]; then
+                NO_CACHE_OPT="--no-cache"
             elif [ -z "$AGENT" ]; then
                 AGENT="$arg"
             fi
@@ -488,19 +529,51 @@ case "$COMMAND" in
         BASE_EXISTS=$(docker exec isolation-dind-host docker images -q "${BASE_IMAGE}" 2>/dev/null || true)
         if [ -z "$BASE_EXISTS" ] || [ "$FORCE_BASE" = true ]; then
             echo -e "building ${BASE_IMAGE} using ${DOCKERFILE_PATH}..."
-            docker exec -it isolation-dind-host docker build -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
+            docker exec -it isolation-dind-host docker build $NO_CACHE_OPT -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
         else
             echo -e "reusing cached ${BASE_IMAGE} (use --base to rebuild)"
         fi
         
         echo -e "building agent blueprint '${AGENT}'..."
-        docker exec -it isolation-dind-host docker build -t local/agent-${AGENT}-agent:latest -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
+        docker exec -it isolation-dind-host docker build $NO_CACHE_OPT -t local/agent-${AGENT}-agent:${BASE_IMAGE_TAG} -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
         echo -e "built agent blueprint: ${AGENT}"
         ;;
     stats)
         if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
             echo -e "streaming nested container stats (press ctrl+c to exit)..."
             docker exec -it isolation-dind-host docker stats
+        else
+            echo -e "error: host is not running. run './isolation start' first."
+        fi
+        ;;
+    space|df)
+        echo -e "\033[1;30m--- Host Storage Usage ---\033[0m"
+        df -h . | grep -v Filesystem || true
+        echo -e "\n\033[1;30m--- Inner Docker Storage Usage ---\033[0m"
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec isolation-dind-host df -h /var/lib/docker | grep -v Filesystem || true
+            echo -e "\n\033[1;30m--- Inner Docker System df ---\033[0m"
+            docker exec isolation-dind-host docker system df || true
+            echo -e "\n\033[1;30m--- Persistent Workspaces Disk Usage ---\033[0m"
+            docker exec isolation-dind-host sh -c "du -sh /app/${INSTANCES_DIR:-instances}/* 2>/dev/null" || echo "no persistent workspaces found."
+            echo -e "\n\033[1;30m--- gVisor Logs Disk Usage ---\033[0m"
+            docker exec isolation-dind-host du -sh /var/log/gvisor 2>/dev/null || true
+            echo -e "\n\033[1;30m--- Container Writable Layer Sizes ---\033[0m"
+            docker exec isolation-dind-host docker ps -s --format "table {{.Names}}\t{{.Size}}" || true
+        else
+            echo -e "error: host is not running. run './isolation start' first."
+        fi
+        ;;
+    btop)
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec -it isolation-dind-host btop --force-utf "$@"
+        else
+            echo -e "error: host is not running. run './isolation start' first."
+        fi
+        ;;
+    ctop)
+        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+            docker exec -it isolation-dind-host ctop "$@"
         else
             echo -e "error: host is not running. run './isolation start' first."
         fi

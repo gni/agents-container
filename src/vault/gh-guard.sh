@@ -27,6 +27,41 @@ done
 COMMAND="${COMMAND,,}"
 SUBCOMMAND="${SUBCOMMAND,,}"
 
+# Security check: Block verbose, debug, and token-dumping arguments
+for arg in "$@"; do
+    arg_lower="${arg,,}"
+    if [[ "$arg_lower" == "-v" || "$arg_lower" == "--verbose" || "$arg_lower" == "--debug" || "$arg_lower" == "-t" || "$arg_lower" == "--show-token" || "$arg_lower" == "--token" ]]; then
+        echo "security block: command argument is blocked for security reasons" >&2
+        exit 1
+    fi
+done
+
+# Block commands that can print secrets
+if [[ "$COMMAND" == "auth" ]]; then
+    if [[ "$SUBCOMMAND" != "status" && "$SUBCOMMAND" != "git-credential" ]]; then
+        echo "security block: command is blocked for security reasons" >&2
+        exit 1
+    fi
+fi
+
+if [[ "$COMMAND" == "config" ]]; then
+    echo "security block: config command is blocked for security reasons" >&2
+    exit 1
+fi
+
+ALLOWED_HOSTS="${GITHUB_HOSTS:-github.com,api.github.com}"
+
+is_host_allowed() {
+    local host="$1"
+    local IFS=','
+    for allowed in $ALLOWED_HOSTS; do
+        if [[ "$host" == "$allowed" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 run_secure_gh() {
     if [ -z "$SECURE_TOKEN" ]; then
         exec /usr/bin/gh-original "$@"
@@ -36,9 +71,21 @@ run_secure_gh() {
     TMP_CONF=$(mktemp -d /tmp/gh-conf-XXXXXX)
     trap 'rm -rf "$TMP_CONF"' EXIT INT TERM
     
-    GH_CONFIG_DIR="$TMP_CONF" /usr/bin/gh-original auth login --hostname github.com --with-token <<< "$SECURE_TOKEN" >/dev/null 2>&1
+    local GH_HOST="github.com"
+    for ((i=1; i<=$#; i++)); do
+        if [[ "${!i}" == "--hostname" ]]; then
+            local next_idx=$((i+1))
+            GH_HOST="${!next_idx}"
+            break
+        elif [[ "${!i}" == "-h" ]]; then
+            local next_idx=$((i+1))
+            GH_HOST="${!next_idx}"
+            break
+        fi
+    done
     
     set +e
+    GH_CONFIG_DIR="$TMP_CONF" /usr/bin/gh-original auth login --hostname "$GH_HOST" --with-token <<< "$SECURE_TOKEN" >/dev/null 2>&1
     GH_CONFIG_DIR="$TMP_CONF" /usr/bin/gh-original "$@"
     local RET=$?
     set -e
@@ -63,25 +110,27 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
         CUR_PID=$PPID
         LEGIT_GIT_OP=0
         ROOT_GIT_PID=""
+        BLOCKED=0
         
-
         while [ "$CUR_PID" -gt 1 ]; do
             P_EXE=$(readlink -f /proc/$CUR_PID/exe 2>/dev/null || true)
             P_CMD=$(cat /proc/$CUR_PID/cmdline 2>/dev/null | tr '\0' ' ')
             
-            P_EXE_BASE=$(basename "$P_EXE" 2>/dev/null || echo "")
             if [[ "$P_EXE" != "/usr/bin/git" && "$P_EXE" != */git-core/git* && "$P_EXE" != "/usr/local/bin/git" && \
                   "$P_EXE" != "/usr/bin/bash" && "$P_EXE" != "/bin/bash" && \
                   "$P_EXE" != "/usr/bin/sh" && "$P_EXE" != "/bin/sh" && \
                   "$P_EXE" != "/usr/bin/dash" && "$P_EXE" != "/bin/dash" && \
+                  "$P_EXE" != "/usr/bin/zsh" && "$P_EXE" != "/bin/zsh" && \
                   "$P_EXE" != "/usr/bin/gh-original" && "$P_EXE" != "/usr/local/bin/vault-wrapper" && \
                   "$P_EXE" != "/usr/bin/node" && "$P_EXE" != "/usr/local/bin/node" && \
-                  "$P_EXE_BASE" != python* && "$P_EXE_BASE" != ruby* && "$P_EXE_BASE" != perl* && "$P_EXE_BASE" != php* && "$P_EXE_BASE" != java* ]]; then
+                  "$P_EXE" != "/usr/bin/python3" && "$P_EXE" != "/usr/bin/python" && \
+                  "$P_EXE" != "/usr/bin/ruby" && "$P_EXE" != "/usr/bin/perl" && \
+                  "$P_EXE" != "/usr/bin/php" && "$P_EXE" != "/usr/bin/java" ]]; then
                 echo "security block: malicious executable detected in credential delegation chain: $P_EXE" >&2
                 exit 1
             fi
 
-            if [[ "$P_EXE" == "/usr/bin/bash" || "$P_EXE" == "/bin/bash" || "$P_EXE" == "/usr/bin/sh" || "$P_EXE" == "/bin/sh" || "$P_EXE" == "/usr/bin/dash" || "$P_EXE" == "/bin/dash" ]]; then
+            if [[ "$P_EXE" == "/usr/bin/bash" || "$P_EXE" == "/bin/bash" || "$P_EXE" == "/usr/bin/sh" || "$P_EXE" == "/bin/sh" || "$P_EXE" == "/usr/bin/dash" || "$P_EXE" == "/bin/dash" || "$P_EXE" == "/usr/bin/zsh" || "$P_EXE" == "/bin/zsh" ]]; then
                 if [[ "$P_CMD" =~ [\,\<\>\|\&\;\`\$\(\)] ]] || [[ "$P_CMD" == *$'\n'* ]] || [[ "$P_CMD" == *$'\r'* ]]; then
                     echo "security block: shell metacharacter injection detected in credential chain" >&2
                     exit 1
@@ -89,10 +138,41 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
             fi
             
             if [[ "$P_EXE" == "/usr/bin/git" || "$P_EXE" == "/usr/local/bin/git" || "$P_EXE" == */git-core/git* ]]; then
-                if [[ "$P_CMD" == *"push"* || "$P_CMD" == *"pull"* || "$P_CMD" == *"fetch"* || "$P_CMD" == *"clone"* || "$P_CMD" == *"ls-remote"* || "$P_CMD" == *"submodule"* || "$P_CMD" == *"remote-https"* ]]; then
-                    LEGIT_GIT_OP=1
-                    ROOT_GIT_PID=$CUR_PID
-                    break
+                LEGIT_GIT_OP=1
+                ROOT_GIT_PID=$CUR_PID
+                
+                # Check if it is the main git process
+                if [[ "$P_EXE" == */git ]]; then
+                    args=()
+                    while IFS= read -r -d '' arg; do
+                        args+=("$arg")
+                    done < <(cat "/proc/$CUR_PID/cmdline" 2>/dev/null)
+                    
+                    if [ ${#args[@]} -gt 0 ]; then
+                        i=1
+                        git_cmd=""
+                        while [ $i -lt ${#args[@]} ]; do
+                            arg="${args[$i]}"
+                            if [[ "$arg" == -* ]]; then
+                                if [[ "$arg" == "-c" || "$arg" == "-C" ]]; then
+                                    i=$((i + 2))
+                                elif [[ "$arg" == "--git-dir" || "$arg" == "--work-tree" || "$arg" == "--namespace" || "$arg" == "--exec-path" ]]; then
+                                    i=$((i + 2))
+                                else
+                                    i=$((i + 1))
+                                fi
+                            else
+                                git_cmd="$arg"
+                                break
+                            fi
+                        done
+                        
+                        if [[ "$git_cmd" == "push" ]]; then
+                            if [[ "$ALLOW_PUSH" != "true" ]]; then
+                                BLOCKED=1
+                            fi
+                        fi
+                    fi
                 fi
             fi
             
@@ -103,8 +183,7 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
             CUR_PID=$NEXT_PID
         done
         
-        if [ $LEGIT_GIT_OP -eq 1 ]; then
-            
+        if [ $LEGIT_GIT_OP -eq 1 ] && [ $BLOCKED -eq 0 ]; then
             if grep -q -E -z 'GIT_TRACE|GIT_CURL_VERBOSE|CORE_TRACEPACKET' "/proc/$ROOT_GIT_PID/environ" 2>/dev/null; then
                 exit 1
             fi
@@ -116,7 +195,8 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
                 if [[ "$arg" == "get" ]]; then
                     if [ ! -t 0 ]; then
                         STDIN_PAYLOAD=$(cat)
-                        if [[ "$STDIN_PAYLOAD" != *"host=github.com"* && "$STDIN_PAYLOAD" != *"host=api.github.com"* ]]; then
+                        HOST_INPUT=$(echo "$STDIN_PAYLOAD" | grep -E "^host=" | cut -d '=' -f2 | tr -d '\r\n')
+                        if [ -z "$HOST_INPUT" ] || ! is_host_allowed "$HOST_INPUT"; then
                             exit 1
                         fi
                     fi
