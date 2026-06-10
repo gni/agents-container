@@ -1,32 +1,7 @@
 # syntax=docker/dockerfile:1
-FROM node:26-trixie-slim
+FROM otter_local/agent-base:latest
 
-ENV NODE_ENV=production
-ENV DEBIAN_FRONTEND=noninteractive
-ENV NPM_CONFIG_LOGLEVEL=warn
-ENV HOME=/home/node
-
-RUN mkdir -p -m 755 /etc/apt/keyrings \
-    && wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
-    && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update && apt-get install -y --no-install-recommends \
-        git \
-        curl \
-        wget \
-        ca-certificates \
-        procps \
-        build-essential \
-        python3 \
-        python3-dev \
-        python3-venv \
-        zsh \
-        vim \
-        gh \
-    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
-
-RUN curl -sL https://gitlab.com/gitlab-org/cli/-/releases/v1.97.0/downloads/glab_1.97.0_linux_amd64.tar.gz | tar -xz -C /usr/local bin/glab \
-    && mv /usr/local/bin/glab /usr/bin/glab-original
+RUN mv /usr/local/bin/glab /usr/bin/glab-original
 
 COPY src/vault/init-guard.c /tmp/init-guard.c
 RUN gcc -O2 -D_FORTIFY_SOURCE=2 -fstack-protector-strong -Wl,-z,relro,-z,now -fPIE -pie /tmp/init-guard.c -o /usr/local/bin/init-guard \
@@ -82,22 +57,6 @@ RUN git config --system credential.https://github.com.helper "" \
     && git config --system credential.https://gitlab.com.helper "" \
     && git config --system credential.https://gitlab.com.helper "!/usr/local/bin/glab auth git-credential"
 
-# Configure default shell for node user
-RUN chsh -s /bin/zsh node && chsh -s /bin/zsh root && usermod -s /bin/zsh node
-
-# Clone and install dotfiles for node user
-USER node
-RUN UNATTENDED=yes CHSH=no RUNZSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
-    && rm -rf /home/node/.oh-my-zsh/.git \
-    && git clone --depth=1 https://github.com/gni/dotfiles.git /home/node/dotfiles \
-    && cd /home/node/dotfiles \
-    && yes y | ./install.sh || true \
-    && rm -rf /home/node/dotfiles/.git
-USER root
-
-RUN mkdir -p /workspace \
-    && chown -R node:node /workspace
-
 RUN echo 'export LD_PRELOAD="/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy.so"' >> /etc/profile \
     && echo 'export MESH_PROXY_IP="172.20.0.53"' >> /etc/profile \
     && echo 'export LD_PRELOAD="/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy.so"' >> /etc/bash.bashrc \
@@ -105,5 +64,32 @@ RUN echo 'export LD_PRELOAD="/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy
     && mkdir -p /etc/zsh \
     && echo 'export LD_PRELOAD="/usr/local/lib/fs_vault.so /usr/local/lib/net_proxy.so"' >> /etc/zsh/zshrc \
     && echo 'export MESH_PROXY_IP="172.20.0.53"' >> /etc/zsh/zshrc
+
+ARG SETUP_ZSH=false
+RUN if [ "$SETUP_ZSH" = "true" ]; then \
+        chsh -s /bin/zsh node && chsh -s /bin/zsh root && usermod -s /bin/zsh node; \
+    fi
+
+USER node
+RUN if [ "$SETUP_ZSH" = "true" ]; then \
+        UNATTENDED=yes CHSH=no RUNZSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" \
+        && rm -rf /home/node/.oh-my-zsh/.git \
+        && git clone --depth=1 https://github.com/gni/dotfiles.git /home/node/dotfiles \
+        && cd /home/node/dotfiles \
+        && yes y | ./install.sh || true \
+        && rm -rf /home/node/dotfiles/.git; \
+    fi
+USER root
+
+# ─── tmux configuration ──────────────────────────────────────────────────────
+RUN echo 'set -g default-terminal "xterm-256color"' > /etc/tmux.conf \
+    && echo 'set-option -ga terminal-overrides ",xterm-256color:Tc"' >> /etc/tmux.conf \
+    && echo 'set -s escape-time 0' >> /etc/tmux.conf \
+    && echo 'set -g history-limit 50000' >> /etc/tmux.conf \
+    && echo 'set -g focus-events on' >> /etc/tmux.conf \
+    && echo 'set -g extended-keys on' >> /etc/tmux.conf \
+    && echo 'set -g extended-keys-format csi-u' >> /etc/tmux.conf \
+    && echo 'set -g mouse on' >> /etc/tmux.conf \
+    && echo 'set -g status off' >> /etc/tmux.conf
 
 WORKDIR /workspace

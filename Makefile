@@ -23,7 +23,7 @@ override INSTANCE_NAME := $(INSTANCE_NAME)_
 endif
 
 help:
-	@printf "Docker-in-Docker & gVisor Security Mesh Agent Provisioning Control\n"
+	@printf "agents container control\n"
 	@printf "==================================================================\n\n"
 	@printf "Commands:\n"
 	@printf "  help            Display this documentation.\n"
@@ -99,11 +99,16 @@ run: setup-global setup-agent setup-instance dind-start
 	@echo "starting agent $(AGENT_TYPE)..."
 	@PARANOID=$$(grep -E "^PARANOID_MODE=" $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env 2>/dev/null | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true); \
 	if [ "$$PARANOID" = "true" ] || [ "$$PARANOID_MODE" = "true" ]; then \
-		export BASE_IMAGE="local/agent-base:paranoid"; \
+		export BASE_IMAGE="otter_local/agent-base:paranoid"; \
 		export BASE_IMAGE_TAG="paranoid"; \
 	else \
-		export BASE_IMAGE="local/agent-base:latest"; \
+		export BASE_IMAGE="otter_local/agent-base:latest"; \
 		export BASE_IMAGE_TAG="latest"; \
+	fi; \
+	if [ "$$USE_TMUX" = "true" ] || [ "$$USE_TMUX" = "1" ] || [ "$$TMUX" = "true" ] || [ "$$TMUX" = "1" ]; then \
+		export RUN_CMD="tmux new-session -s agent_run 'sh /usr/local/bin/agent-run.sh'"; \
+	else \
+		export RUN_CMD="$(ARGS)"; \
 	fi; \
 	docker exec -it \
 		-e AGENT_TYPE \
@@ -121,17 +126,22 @@ run: setup-global setup-agent setup-instance dind-start
 		-e BASE_IMAGE_TAG="$$BASE_IMAGE_TAG" \
 		-e INSTANCES_DIR \
 		isolation-dind-host \
-		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --rm agent $(ARGS)
-
+		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --rm agent $$RUN_CMD
+ 
 shell: setup-global setup-agent setup-instance dind-start
 	@echo "starting interactive shell..."
 	@PARANOID=$$(grep -E "^PARANOID_MODE=" $(INSTANCES_DIR)/$(INSTANCE_NAME)/.env 2>/dev/null | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true); \
 	if [ "$$PARANOID" = "true" ] || [ "$$PARANOID_MODE" = "true" ]; then \
-		export BASE_IMAGE="local/agent-base:paranoid"; \
+		export BASE_IMAGE="otter_local/agent-base:paranoid"; \
 		export BASE_IMAGE_TAG="paranoid"; \
 	else \
-		export BASE_IMAGE="local/agent-base:latest"; \
+		export BASE_IMAGE="otter_local/agent-base:latest"; \
 		export BASE_IMAGE_TAG="latest"; \
+	fi; \
+	if [ "$$USE_TMUX" = "true" ] || [ "$$USE_TMUX" = "1" ] || [ "$$TMUX" = "true" ] || [ "$$TMUX" = "1" ]; then \
+		export ENTRYPOINT_SHELL="tmux"; \
+	else \
+		export ENTRYPOINT_SHELL="/bin/zsh"; \
 	fi; \
 	docker exec -it \
 		-e AGENT_TYPE \
@@ -149,7 +159,7 @@ shell: setup-global setup-agent setup-instance dind-start
 		-e BASE_IMAGE_TAG="$$BASE_IMAGE_TAG" \
 		-e INSTANCES_DIR \
 		isolation-dind-host \
-		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --entrypoint /bin/zsh --rm agent
+		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --entrypoint "$$ENTRYPOINT_SHELL" --rm agent
 
 
 clean-instance:

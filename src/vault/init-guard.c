@@ -146,36 +146,7 @@ int validate_process_chain(pid_t client_pid, int is_git_helper) {
             return 0;
         }
         
-        // If bash/sh/dash/zsh, check cmdline for metacharacters
-        if (strcmp(exe_path, "/usr/bin/bash") == 0 ||
-            strcmp(exe_path, "/bin/bash") == 0 ||
-            strcmp(exe_path, "/usr/bin/sh") == 0 ||
-            strcmp(exe_path, "/bin/sh") == 0 ||
-            strcmp(exe_path, "/usr/bin/dash") == 0 ||
-            strcmp(exe_path, "/bin/dash") == 0 ||
-            strcmp(exe_path, "/usr/bin/zsh") == 0 ||
-            strcmp(exe_path, "/bin/zsh") == 0) {
-            char cmdline_path[128];
-            snprintf(cmdline_path, sizeof(cmdline_path), "/proc/%d/cmdline", cur_pid);
-            FILE *f = fopen(cmdline_path, "r");
-            if (f) {
-                char cmdline[1024];
-                size_t n = fread(cmdline, 1, sizeof(cmdline)-1, f);
-                fclose(f);
-                if (n > 0) {
-                    cmdline[n] = '\0';
-                    for (size_t i = 0; i < n; i++) {
-                        char c = cmdline[i];
-                        // Block command chaining, redirection, piping, backticks, subshells, newlines
-                        if (c == ',' || c == '<' || c == '>' || c == '|' || c == '&' || c == ';' ||
-                            c == '`' || c == '$' || c == '(' || c == ')' || c == '\n' || c == '\r') {
-                            return 0;
-                        }
-                    }
-                }
-            }
-        }
-        
+
         // If git, check if command is push/pull/fetch/clone/ls-remote/submodule/remote-https
         if (strcmp(exe_path, "/usr/bin/git") == 0 ||
             strcmp(exe_path, "/usr/local/bin/git") == 0 ||

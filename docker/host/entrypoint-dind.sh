@@ -122,16 +122,16 @@ if [ ! -f /app/config/ottergate/resolv.conf ]; then
     echo "nameserver 172.20.0.53" > /app/config/ottergate/resolv.conf
 fi
 
-if ! docker image inspect local/agent-base:latest >/dev/null 2>&1; then
-    echo "dind: pre-building base image (local/agent-base)..."
-    docker build -t local/agent-base:latest -f /app/docker/agent/Dockerfile.base /app
+if ! docker image inspect otter_local/agent-base:latest >/dev/null 2>&1; then
+    echo "dind: pre-building base image (otter_local/agent-base)..."
+    docker build -t otter_local/agent-base:latest -f /app/docker/agent/Dockerfile.base /app
 else
     echo "dind: using cached base image."
 fi
 
-if ! docker image inspect local/agent-base:paranoid >/dev/null 2>&1; then
-    echo "dind: pre-building paranoid base image (local/agent-base:paranoid)..."
-    docker build -t local/agent-base:paranoid -f /app/docker/agent/Dockerfile.paranoid /app
+if ! docker image inspect otter_local/agent-base:paranoid >/dev/null 2>&1; then
+    echo "dind: pre-building paranoid base image (otter_local/agent-base:paranoid)..."
+    docker build -t otter_local/agent-base:paranoid -f /app/docker/agent/Dockerfile.paranoid /app
 else
     echo "dind: using cached paranoid base image."
 fi

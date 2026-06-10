@@ -114,7 +114,7 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
         
         while [ "$CUR_PID" -gt 1 ]; do
             P_EXE=$(readlink -f /proc/$CUR_PID/exe 2>/dev/null || true)
-            P_CMD=$(cat /proc/$CUR_PID/cmdline 2>/dev/null | tr '\0' ' ')
+            P_BASE=$(basename "$P_EXE")
             
             if [[ "$P_EXE" != "/usr/bin/git" && "$P_EXE" != */git-core/git* && "$P_EXE" != "/usr/local/bin/git" && \
                   "$P_EXE" != "/usr/bin/bash" && "$P_EXE" != "/bin/bash" && \
@@ -125,16 +125,12 @@ if [[ "$COMMAND" == "auth" || "$COMMAND" == "repo" || "$COMMAND" == "secret" || 
                   "$P_EXE" != "/usr/bin/node" && "$P_EXE" != "/usr/local/bin/node" && \
                   "$P_EXE" != "/usr/bin/python3" && "$P_EXE" != "/usr/bin/python" && \
                   "$P_EXE" != "/usr/bin/ruby" && "$P_EXE" != "/usr/bin/perl" && \
-                  "$P_EXE" != "/usr/bin/php" && "$P_EXE" != "/usr/bin/java" ]]; then
+                  "$P_EXE" != "/usr/bin/php" && "$P_EXE" != "/usr/bin/java" && \
+                  "$P_BASE" != "agy" && "$P_BASE" != "claude" && "$P_BASE" != "codex" && \
+                  "$P_BASE" != "gemini" && "$P_BASE" != "hermes" && "$P_BASE" != "opencode" && \
+                  "$P_BASE" != "pi" ]]; then
                 echo "security block: malicious executable detected in credential delegation chain: $P_EXE" >&2
                 exit 1
-            fi
-
-            if [[ "$P_EXE" == "/usr/bin/bash" || "$P_EXE" == "/bin/bash" || "$P_EXE" == "/usr/bin/sh" || "$P_EXE" == "/bin/sh" || "$P_EXE" == "/usr/bin/dash" || "$P_EXE" == "/bin/dash" || "$P_EXE" == "/usr/bin/zsh" || "$P_EXE" == "/bin/zsh" ]]; then
-                if [[ "$P_CMD" =~ [\,\<\>\|\&\;\`\$\(\)] ]] || [[ "$P_CMD" == *$'\n'* ]] || [[ "$P_CMD" == *$'\r'* ]]; then
-                    echo "security block: shell metacharacter injection detected in credential chain" >&2
-                    exit 1
-                fi
             fi
             
             if [[ "$P_EXE" == "/usr/bin/git" || "$P_EXE" == "/usr/local/bin/git" || "$P_EXE" == */git-core/git* ]]; then

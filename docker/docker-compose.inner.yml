@@ -45,8 +45,8 @@ services:
       dockerfile: docker/agent/Dockerfile.agent
       args:
         AGENT_TYPE: ${AGENT_TYPE}
-        BASE_IMAGE: ${BASE_IMAGE:-local/agent-base:latest}
-    image: local/agent-${AGENT_TYPE}-agent:${BASE_IMAGE_TAG:-latest}
+        BASE_IMAGE: ${BASE_IMAGE:-otter_local/agent-base:latest}
+    image: otter_local/agent-${AGENT_TYPE}-agent:${BASE_IMAGE_TAG:-latest}
     hostname: ${INSTANCE_NAME}
     labels:
       - "isolation.instance=${INSTANCE_NAME}"

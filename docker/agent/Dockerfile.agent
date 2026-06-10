@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=local/agent-base:latest
+ARG BASE_IMAGE=otter_local/agent-base:latest
 FROM ${BASE_IMAGE}
 
 ARG AGENT_TYPE

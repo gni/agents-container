@@ -1,6 +1,6 @@
-# Isolation SecMesh: Nested DinD & gVisor Sandbox
+# OTTER: Orchestrated Trusted Transparent Execution Runtime
 
-Welcome to **Isolation**, a cutting-edge container virtualization and security sandboxing environment. 
+Welcome to **OTTER** (Orchestrated Trusted Transparent Execution Runtime), a cutting-edge container virtualization and security sandboxing environment. 
 
 This project solves a critical security challenge: running untrusted developer/coding agents safely. By using a **Docker-in-Docker (DinD)** host combined with the **gVisor (`runsc`)** kernel virtualization runtime and the **Ottergate** Zero-Trust L7 DNS/Proxy, agents are double-sandboxed and isolated from your host system and private network.
 

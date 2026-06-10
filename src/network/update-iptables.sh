@@ -38,7 +38,10 @@ if ! iptables -t nat -C PREROUTING -j ISOLATION-NAT 2>/dev/null; then
 fi
 
 # Get all IPs of the Ottergate proxy container
-OTTERGATE_IPS=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' isolation-ottergate-1 2>/dev/null || echo "172.20.0.53")
+OTTERGATE_IPS=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' isolation-ottergate-1 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | tr '\n' ' ')
+if [ -z "$OTTERGATE_IPS" ]; then
+    OTTERGATE_IPS="172.20.0.53"
+fi
 echo "[update-iptables] Detected Ottergate IPs: $OTTERGATE_IPS"
 
 # 4. Populate ISOLATION-FW (Forward / Input)
