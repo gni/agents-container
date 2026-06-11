@@ -34,21 +34,21 @@ log_info() { echo -e "${DIM}info:${RESET} $1"; }
 show_usage() {
     echo -e "usage: ./ac <command> [arguments] [options]\n"
     echo -e "commands:"
-    echo -e "  ${GREEN}start${RESET}                             start the host daemon and proxy"
-    echo -e "  ${GREEN}stop${RESET}                              stop the host daemon and proxy"
-    echo -e "  ${GREEN}down${RESET}                              stop and remove all containers"
-    echo -e "  ${GREEN}restart${RESET}                           restart proxy and update network rules"
-    echo -e "  ${GREEN}status${RESET}                            check daemon and sandboxes status"
-    echo -e "  ${GREEN}stats${RESET}                             stream real-time container resource stats"
-    echo -e "  ${GREEN}ctop${RESET}                              launch container metrics dashboard (ctop)"
-    echo -e "  ${GREEN}space${RESET}                             check disk space usage of agent components"
-    echo -e "  ${GREEN}btop${RESET}                              launch interactive system resource monitor"
-    echo -e "  ${GREEN}list${RESET}                              list running sandboxes and workspaces"
-    echo -e "  ${GREEN}shell${RESET} <agent> [instance]          spawn an interactive sandbox shell"
-    echo -e "  ${GREEN}run${RESET} <agent> [instance]            run sandbox in headless mode"
+    echo -e "  ${GREEN}start${RESET}                               start the host daemon and proxy"
+    echo -e "  ${GREEN}stop${RESET}                                stop the host daemon and proxy"
+    echo -e "  ${GREEN}down${RESET}                                stop and remove all containers"
+    echo -e "  ${GREEN}restart${RESET}                            restart proxy and update network rules"
+    echo -e "  ${GREEN}status${RESET}                             check daemon and sandboxes status"
+    echo -e "  ${GREEN}stats${RESET}                              stream real-time container resource stats"
+    echo -e "  ${GREEN}ctop${RESET}                               launch container metrics dashboard (ctop)"
+    echo -e "  ${GREEN}space${RESET}                              check disk space usage of agent components"
+    echo -e "  ${GREEN}btop${RESET}                               launch interactive system resource monitor"
+    echo -e "  ${GREEN}list${RESET}                               list running sandboxes and workspaces"
+    echo -e "  ${GREEN}shell${RESET} [agent] <instance>          spawn an interactive sandbox shell"
+    echo -e "  ${GREEN}run${RESET} [agent] <instance>            run sandbox in headless mode"
     echo -e "  ${GREEN}build${RESET} <agent> [--base]            force rebuild agent/base images"
-    echo -e "  ${GREEN}logs${RESET} [host | proxy | gvisor]      view logs from host, proxy, or gvisor"
-    echo -e "  ${GREEN}logs${RESET} agent <instance> [agent]     view logs from a specific agent instance"
+    echo -e "  ${GREEN}logs${RESET} [host | proxy | gvisor]     view logs from host, proxy, or gvisor"
+    echo -e "  ${GREEN}logs${RESET} agent <instance> [agent]      view logs from a specific agent instance"
     echo -e "  ${GREEN}clean${RESET} <instance>                  wipe instance credentials (preserve workspace)"
     echo -e "  ${GREEN}destroy${RESET} <instance>                wipe instance credentials and delete workspace"
     echo -e "  ${GREEN}clean-all${RESET}                         wipe credentials for all instances"
@@ -61,6 +61,7 @@ show_usage() {
     echo -e "examples:"
     echo -e "  ./ac start"
     echo -e "  ./ac shell pi my_pi_debug --cpus 2 -m 1g"
+    echo -e "  ./ac shell my_pi_debug"
     echo -e "  ./ac list"
     exit 0
 }
@@ -137,6 +138,11 @@ provision_instance() {
         else
             printf "GITHUB_TOKEN=your_token\nGITLAB_TOKEN=your_token\nGIT_NAME=\"Your Name\"\nGIT_EMAIL=\"your.email@example.com\"\n" > "$INSTANCES_DIR"/"$inst"/.env
         fi
+    fi
+
+    # Explicit lock to prevent type injection flaws across execution sessions
+    if ! grep -qE "^AGENT_TYPE=" "$INSTANCES_DIR"/"$inst"/.env; then
+        printf "\nAGENT_TYPE=%s\n" "$agent" >> "$INSTANCES_DIR"/"$inst"/.env
     fi
 
     # Create dummy secret files to allow bind mounts
@@ -256,10 +262,55 @@ case "$COMMAND" in
             esac
         done
         
+        # Context-Aware Structural Pattern Evaluation Matrix
+        if [ -n "$AGENT" ] && [ -z "$INSTANCE" ]; then
+            if [ -d "$INSTANCES_DIR/$AGENT" ]; then
+                # Context A: Explicitly matched an existing directory instance
+                INSTANCE="$AGENT"
+                if [ -f "$INSTANCES_DIR/$INSTANCE/.env" ] && grep -qE "^AGENT_TYPE=" "$INSTANCES_DIR/$INSTANCE/.env"; then
+                    AGENT=$(grep -E "^AGENT_TYPE=" "$INSTANCES_DIR/$INSTANCE/.env" | cut -d '=' -f2- | tr -d '"' | tr -d "'")
+                else
+                    AGENT=$(echo "$INSTANCE" | cut -d'_' -f1)
+                fi
+            elif [ -d "agents/blueprints/$AGENT" ]; then
+                # Context B: Explicitly matched a raw blueprint target string
+                INSTANCE="${AGENT}_session"
+            else
+                # Context C: Implicit dynamic name parsing (Lazy Initialization Strategy)
+                INSTANCE="$AGENT"
+                MATCHED_BLUE=false
+                for b_path in agents/blueprints/*; do
+                    if [ -d "$b_path" ]; then
+                        b_test=$(basename "$b_path")
+                        if [[ "$INSTANCE" == "${b_test}"* ]] || [[ "$INSTANCE" == *"${b_test}"* ]]; then
+                            AGENT="$b_test"
+                            MATCHED_BLUE=true
+                            break
+                        fi
+                    fi
+                done
+                if [ "$MATCHED_BLUE" = false ]; then
+                    AGENT="pi"
+                fi
+            fi
+        fi
+
         AGENT=${AGENT:-pi}
         INSTANCE=${INSTANCE:-${AGENT}_session}
         if [ ${#INSTANCE} -eq 1 ]; then
             INSTANCE="${INSTANCE}_"
+        fi
+
+        # Strict Namespace Isolation Check: Prevent mutating an existing instance with a different blueprint type
+        if [ -d "$INSTANCES_DIR/$INSTANCE" ]; then
+            tracking_file="$INSTANCES_DIR/$INSTANCE/.env"
+            if [ -f "$tracking_file" ]; then
+                detected_type=$(grep -E "^AGENT_TYPE=" "$tracking_file" | cut -d '=' -f2- | tr -d '"' | tr -d "'" || true)
+                if [ -n "$detected_type" ] && [ "$detected_type" != "$AGENT" ]; then
+                    echo -e "${RED}error: name collision detected. instance '${INSTANCE}' is strictly bound to agent blueprint type '${detected_type}', cannot re-initialize or execute as type '${AGENT}'.${RESET}" >&2
+                    exit 1
+                fi
+            fi
         fi
 
         if [ ! -d "agents/blueprints/$AGENT" ]; then
