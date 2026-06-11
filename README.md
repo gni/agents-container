@@ -71,6 +71,19 @@ teardown nested environments: stop the outer host daemon, remove all nested cont
 ./ac down
 ```
 
+## supported agent blueprints
+
+the sandbox supports several pre-configured agent blueprints, located in the `agents/blueprints` directory. you can instantiate any of them using `./ac run <blueprint_name> <instance_name>`:
+
+*   **`antigravity`**: specialized sandbox for the antigravity coding agent CLI.
+*   **`gemini`**: pre-configured container environment tailored for google gemini code assistants.
+*   **`claude`**: pre-configured container environment tailored for anthropic claude developer agents.
+*   **`hermes`**: customized runtime environment for the hermes developer agent.
+*   **`codex`**: optimized developer environment for openai codex and chat-based coding agents.
+*   **`opencode`**: sandbox designed for open-source code interpreter agents (opencodeinterpreter).
+*   **`pi`**: sandbox optimized for inflection pi and general-purpose developer agents.
+*   **`base`**: a clean, minimal developer container with standard debugging and build utilities.
+
 ## architecture and security model
 
 the security boundaries are constructed across nested virtualization, system call virtualization, privilege control, and network policies:
