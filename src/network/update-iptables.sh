@@ -61,7 +61,15 @@ import socket
 def resolve_hostname(name):
     try:
         infos = socket.getaddrinfo(name, None)
-        return list(set([info[4][0] for info in infos]))
+        ips = []
+        for info in infos:
+            ip = info[4][0]
+            try:
+                if ipaddress.ip_address(ip).version == 4:
+                    ips.append(ip)
+            except ValueError:
+                pass
+        return list(set(ips))
     except Exception:
         return []
 
