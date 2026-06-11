@@ -383,16 +383,28 @@ case "$COMMAND" in
             echo -e "starting agent..."
         fi
 
+        proxy_build_args=""
+        [ -n "$http_proxy" ] && proxy_build_args="$proxy_build_args --build-arg http_proxy=$http_proxy"
+        [ -n "$https_proxy" ] && proxy_build_args="$proxy_build_args --build-arg https_proxy=$https_proxy"
+        [ -n "$HTTP_PROXY" ] && proxy_build_args="$proxy_build_args --build-arg HTTP_PROXY=$HTTP_PROXY"
+        [ -n "$HTTPS_PROXY" ] && proxy_build_args="$proxy_build_args --build-arg HTTPS_PROXY=$HTTPS_PROXY"
+        [ -n "$no_proxy" ] && proxy_build_args="$proxy_build_args --build-arg no_proxy=$no_proxy"
+        [ -n "$NO_PROXY" ] && proxy_build_args="$proxy_build_args --build-arg NO_PROXY=$NO_PROXY"
+
         BASE_EXISTS=$(docker exec ac-dind-host docker images -q "${BASE_IMAGE}" 2>/dev/null || true)
         if [ -z "$BASE_EXISTS" ] || [ "$FORCE_BUILD" = true ]; then
+            if [ "$DOCKERFILE_PATH" = "Dockerfile.paranoid" ]; then
+                echo -e "building otter_local/agent-base:latest using Dockerfile.base..."
+                docker exec -it ac-dind-host docker build $proxy_build_args -t "otter_local/agent-base:latest" -f "/app/docker/agent/Dockerfile.base" /app
+            fi
             echo -e "building ${BASE_IMAGE} using ${DOCKERFILE_PATH}..."
-            docker exec -it ac-dind-host docker build -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
+            docker exec -it ac-dind-host docker build $proxy_build_args -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
         fi
 
         IMAGE_EXISTS=$(docker exec ac-dind-host docker images -q "otter_local/agent-${AGENT}-agent:${BASE_IMAGE_TAG}" 2>/dev/null || true)
         if [ -z "$IMAGE_EXISTS" ] || [ "$FORCE_BUILD" = true ]; then
             echo -e "building agent image..."
-            docker exec -it ac-dind-host docker build -t otter_local/agent-${AGENT}-agent:${BASE_IMAGE_TAG} -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
+            docker exec -it ac-dind-host docker build $proxy_build_args -t otter_local/agent-${AGENT}-agent:${BASE_IMAGE_TAG} -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
         else
             echo -e "reusing cached agent image (use --build to rebuild)"
         fi
@@ -604,6 +616,10 @@ case "$COMMAND" in
         
         BASE_EXISTS=$(docker exec ac-dind-host docker images -q "${BASE_IMAGE}" 2>/dev/null || true)
         if [ -z "$BASE_EXISTS" ] || [ "$FORCE_BASE" = true ]; then
+            if [ "$DOCKERFILE_PATH" = "Dockerfile.paranoid" ]; then
+                echo -e "building otter_local/agent-base:latest using Dockerfile.base..."
+                docker exec -it ac-dind-host docker build $NO_CACHE_OPT -t "otter_local/agent-base:latest" -f "/app/docker/agent/Dockerfile.base" /app
+            fi
             echo -e "building ${BASE_IMAGE} using ${DOCKERFILE_PATH}..."
             docker exec -it ac-dind-host docker build $NO_CACHE_OPT -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
         else
