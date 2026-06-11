@@ -94,23 +94,32 @@ ensure_dind_healthy() {
                 break
             fi
             
-            local logs
-            logs=$(docker logs ac-dind-host 2>&1 || echo "")
-            
-            if echo "$logs" | grep -q "pre-building base image (otter_local/agent-base)"; then
-                phase="building base agent image (takes up to a minute)..."
-            fi
-            if echo "$logs" | grep -q "pre-building paranoid base image"; then
-                phase="building paranoid base image (takes up to a minute)..."
-            fi
-            if echo "$logs" | grep -q "Starting Ottergate inside nested Docker"; then
-                phase="starting proxy..."
-            fi
-            if [ "$healthy" = "starting" ]; then
-                phase="verifying proxy..."
-            fi
-            
+            local bootstrap_done=false
             if docker exec ac-dind-host test -f /var/run/bootstrap_complete >/dev/null 2>&1; then
+                bootstrap_done=true
+            fi
+
+            if [ "$bootstrap_done" = "true" ]; then
+                if [ "$healthy" = "starting" ]; then
+                    phase="verifying proxy..."
+                else
+                    phase="starting proxy..."
+                fi
+            else
+                local logs
+                logs=$(docker logs ac-dind-host 2>&1 || echo "")
+                if echo "$logs" | grep -q "dind: starting ottergate proxy..."; then
+                    phase="starting proxy..."
+                elif echo "$logs" | grep -q "pre-building paranoid base image (otter_local/agent-base:paranoid)..."; then
+                    phase="building paranoid base image (takes up to a minute)..."
+                elif echo "$logs" | grep -q "pre-building base image (otter_local/agent-base)..."; then
+                    phase="building base agent image (takes up to a minute)..."
+                else
+                    phase="starting docker daemon..."
+                fi
+            fi
+            
+            if [ "$bootstrap_done" = "true" ]; then
                 if [ "$healthy" = "failed" ] || [ "$healthy" = "unhealthy" ] || [ "$healthy" = "exited" ] || [ "$healthy" = "not_created" ]; then
                     docker exec -e AGENT_TYPE="${AGENT_TYPE:-base}" -e INSTANCE_NAME="${INSTANCE_NAME:-base_session}" ac-dind-host docker compose -p ac -f /app/docker/docker-compose.inner.yml up -d ottergate >/dev/null 2>&1 || true
                 fi

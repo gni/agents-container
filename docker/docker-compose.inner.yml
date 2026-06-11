@@ -25,7 +25,7 @@ services:
       - OTTERGATE_STREAM_GVISOR_LOGS=${OTTERGATE_STREAM_GVISOR_LOGS:-false}
       - OTTERGATE_LOG_CONTAINER_STDOUT=${OTTERGATE_LOG_CONTAINER_STDOUT:-true}
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
+      test: ["CMD-SHELL", "no_proxy=127.0.0.1,localhost NO_PROXY=127.0.0.1,localhost wget -q --spider --tries=1 -T 2 http://127.0.0.1:8080/healthz"]
       interval: 2s
       timeout: 2s
       retries: 10
