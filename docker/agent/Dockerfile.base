@@ -25,9 +25,18 @@ RUN apk add --no-cache \
         shadow
 
 # Copy custom CA certificates for enterprise SSL proxy/registry access during build
-COPY config/ottergate/certs/custom/ /usr/local/share/ca-certificates/custom/
-RUN if [ -d /usr/local/share/ca-certificates/custom ] && [ "$(ls -A /usr/local/share/ca-certificates/custom)" ]; then \
+COPY config/ottergate/certs/custom/ /tmp/custom-certs/
+RUN if [ -d /tmp/custom-certs ] && [ "$(ls -A /tmp/custom-certs)" ]; then \
+        cp /tmp/custom-certs/*.crt /usr/local/share/ca-certificates/ 2>/dev/null || true; \
+        for f in /tmp/custom-certs/*.pem; do \
+            if [ -f "$$f" ]; then \
+                name_pem=$${f##*/}; \
+                name_no_ext=$${name_pem%.pem}; \
+                cp "$$f" "/usr/local/share/ca-certificates/$$name_no_ext.crt"; \
+            fi; \
+        done; \
         update-ca-certificates; \
+        rm -rf /tmp/custom-certs; \
     fi
 
 # Set environment variables so build-time tools (curl, wget, etc.) trust the custom CA
