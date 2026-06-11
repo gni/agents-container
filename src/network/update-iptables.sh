@@ -86,6 +86,14 @@ try:
     
     # Extract allowed upstreams
     raw_allowed = []
+    for key in ('upstreamHttpProxy', 'upstreamHttpsProxy'):
+        up = cfg.get(key, '')
+        if up:
+            if '//' in up:
+                raw_allowed.append(up.split('//')[1].split(':')[0])
+            else:
+                raw_allowed.append(up.split(':')[0])
+    
     dnat_ips = []
     hosts = cfg.get('hosts', {})
     for h, host_cfg in hosts.items():

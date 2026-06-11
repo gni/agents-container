@@ -2,6 +2,9 @@
   "port": 53,
   "httpPort": 80,
   "httpsPort": 443,
+  "upstreamHttpProxy": "",
+  "upstreamHttpsProxy": "",
+  "upstreamNoProxy": "",
   "tls": {
     "cert": "/app/config/certs/server/server.crt",
     "key": "/app/config/certs/server/server.key",
