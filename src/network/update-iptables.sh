@@ -56,6 +56,14 @@ iptables -A ISOLATION-FW -s 172.21.0.100 -j ACCEPT
 python_out="$(python3 -c "
 import json
 import ipaddress
+import socket
+
+def resolve_hostname(name):
+    try:
+        infos = socket.getaddrinfo(name, None)
+        return list(set([info[4][0] for info in infos]))
+    except Exception:
+        return []
 
 def clean_ips(lst):
     cleaned = []
@@ -89,10 +97,12 @@ try:
     for key in ('upstreamHttpProxy', 'upstreamHttpsProxy'):
         up = cfg.get(key, '')
         if up:
-            if '//' in up:
-                raw_allowed.append(up.split('//')[1].split(':')[0])
-            else:
-                raw_allowed.append(up.split(':')[0])
+            host = up.split('//')[1].split(':')[0] if '//' in up else up.split(':')[0]
+            try:
+                ipaddress.ip_address(host)
+                raw_allowed.append(host)
+            except ValueError:
+                raw_allowed.extend(resolve_hostname(host))
     
     dnat_ips = []
     hosts = cfg.get('hosts', {})
@@ -100,13 +110,22 @@ try:
         hp = host_cfg.get('http_proxy', {})
         if hp and hp.get('enabled', True):
             up = hp.get('upstream', '')
-            if '//' in up:
-                raw_allowed.append(up.split('//')[1].split(':')[0])
+            if up:
+                host = up.split('//')[1].split(':')[0] if '//' in up else up.split(':')[0]
+                try:
+                    ipaddress.ip_address(host)
+                    raw_allowed.append(host)
+                except ValueError:
+                    raw_allowed.extend(resolve_hostname(host))
         tp = host_cfg.get('tls_proxy', {})
         if tp:
             tip = tp.get('targetIp', '')
             if tip:
-                raw_allowed.append(tip)
+                try:
+                    ipaddress.ip_address(tip)
+                    raw_allowed.append(tip)
+                except ValueError:
+                    raw_allowed.extend(resolve_hostname(tip))
         
         # Extract custom IP A records for DNAT transparent redirection
         for r in host_cfg.get('records', []):
