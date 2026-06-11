@@ -12,11 +12,14 @@ touch /app/"$INSTANCES_DIR"/"$INSTANCE_NAME"/.secrets/github_token.txt
 touch /app/"$INSTANCES_DIR"/"$INSTANCE_NAME"/.secrets/gitlab_token.txt
 chmod 600 /app/"$INSTANCES_DIR"/"$INSTANCE_NAME"/.secrets/*.txt
 
-# Fix ownership so files are owned by the host user instead of root
+# Fix ownership so files and the parent instances folder are owned by the host user instead of root
+chown $(stat -c "%u:%g" /app) /app/"$INSTANCES_DIR" 2>/dev/null || true
 chown -R $(stat -c "%u:%g" /app) /app/"$INSTANCES_DIR"/"$INSTANCE_NAME"
 
-echo "dind: configuring public nameservers..."
-echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" > /etc/resolv.conf
+if ! grep -q "nameserver" /etc/resolv.conf; then
+    echo "dind: configuring fallback public nameservers..."
+    echo -e "nameserver 1.1.1.1\nnameserver 8.8.8.8" >> /etc/resolv.conf
+fi
 
 echo "dind: creating gvisor logging directory..."
 mkdir -p /var/log/runsc /var/log/gvisor
