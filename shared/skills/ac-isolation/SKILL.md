@@ -1,5 +1,5 @@
 ---
-name: agent-ac
+name: ac-isolation
 description: Workspace location, Python venv setup, and Rust installation guide. Use as a quick reference for environment setup.
 ---
 
