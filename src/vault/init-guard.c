@@ -431,8 +431,21 @@ int main(int argc, char **argv) {
     }
     print_status(" *", "starting vault daemon", "\033[32mdone\033[0m");
 
+    struct stat st;
+    int needs_chown = 0;
+    if (stat("/workspace", &st) == 0 && st.st_uid != target_uid) {
+        needs_chown = 1;
+    }
+    if (stat("/home/node", &st) == 0 && st.st_uid != target_uid) {
+        needs_chown = 1;
+    }
+
     char chown_cmd[512];
-    snprintf(chown_cmd, sizeof(chown_cmd), "chown -R %d:%d /home/node /workspace 2>/dev/null", target_uid, target_gid);
+    if (needs_chown) {
+        snprintf(chown_cmd, sizeof(chown_cmd), "chown -R %d:%d /home/node /workspace 2>/dev/null", target_uid, target_gid);
+    } else {
+        snprintf(chown_cmd, sizeof(chown_cmd), "chown %d:%d /home/node /workspace 2>/dev/null", target_uid, target_gid);
+    }
     int chown_res = system(chown_cmd);
     (void)chown_res;
     print_status(" *", "setting permissions", "\033[32mdone\033[0m");
