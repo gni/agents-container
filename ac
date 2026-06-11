@@ -90,7 +90,18 @@ ensure_dind_healthy() {
     while true; do
         if [ $((count % 4)) -eq 0 ]; then
             healthy=$(docker exec ac-dind-host docker inspect -f '{{.State.Health.Status}}' ac-ottergate-1 2>&1 || echo "not_created")
+            
+            local init_complete=false
             if [ "$healthy" = "healthy" ]; then
+                init_complete=true
+            fi
+            if [ "$init_complete" = "false" ] && [ "$healthy" != "not_created" ]; then
+                if docker exec ac-dind-host docker logs ac-ottergate-1 2>&1 | grep -q "Initialization complete" >/dev/null 2>&1; then
+                    init_complete=true
+                fi
+            fi
+            
+            if [ "$init_complete" = "true" ]; then
                 break
             fi
             
