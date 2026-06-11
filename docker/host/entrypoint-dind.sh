@@ -2,8 +2,8 @@
 set -e
 
 # Ensure default values are set for internal docker compose evaluation
-export AGENT_TYPE="${AGENT_TYPE:-pi}"
-export INSTANCE_NAME="${INSTANCE_NAME:-pi_session}"
+export AGENT_TYPE="${AGENT_TYPE:-base}"
+export INSTANCE_NAME="${INSTANCE_NAME:-base_session}"
 
 # Ensure instance directories and dummy files exist to prevent docker compose validation errors
 INSTANCES_DIR="${INSTANCES_DIR:-instances}"

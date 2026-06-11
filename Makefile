@@ -14,7 +14,7 @@ export GL_SECRET_TARGET_PATH ?= /run/secrets/gl_$(RANDOM_ID)
 
 # Dynamic defaults for agent and instance provisioning
 export INSTANCES_DIR ?= instances
-export AGENT_TYPE ?= pi
+export AGENT_TYPE ?= base
 export INSTANCE_NAME ?= $(AGENT_TYPE)_$(RANDOM_ID)
 
 # Ensure INSTANCE_NAME is at least 2 characters to satisfy docker daemon constraints
@@ -37,8 +37,8 @@ help:
 	@printf "  clean-all       Wipe all agent credentials from running instances (retaining workspaces).\n"
 	@printf "  destroy-all     Nuclear teardown of all containers, volumes, and ALL workspaces.\n\n"
 	@printf "Environment Overrides:\n"
-	@printf "  AGENT_TYPE        The agent blueprint to build/run (Default: pi)\n"
-	@printf "  INSTANCE_NAME     The unique ID for the container and vault (Default: pi_[RANDOM_ID])\n"
+	@printf "  AGENT_TYPE        The agent blueprint to build/run (Default: base)\n"
+	@printf "  INSTANCE_NAME     The unique ID for the container and vault (Default: base_[RANDOM_ID])\n"
 	@printf "  ARGS              Additional arguments to pass to the run command.\n\n"
 
 setup-global:

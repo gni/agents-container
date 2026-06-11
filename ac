@@ -112,7 +112,7 @@ ensure_dind_healthy() {
             
             if docker exec ac-dind-host test -f /var/run/bootstrap_complete >/dev/null 2>&1; then
                 if [ "$healthy" = "failed" ] || [ "$healthy" = "unhealthy" ] || [ "$healthy" = "exited" ] || [ "$healthy" = "not_created" ]; then
-                    docker exec -e AGENT_TYPE="${AGENT_TYPE:-pi}" -e INSTANCE_NAME="${INSTANCE_NAME:-pi_session}" ac-dind-host docker compose -p ac -f /app/docker/docker-compose.inner.yml up -d ottergate >/dev/null 2>&1 || true
+                    docker exec -e AGENT_TYPE="${AGENT_TYPE:-base}" -e INSTANCE_NAME="${INSTANCE_NAME:-base_session}" ac-dind-host docker compose -p ac -f /app/docker/docker-compose.inner.yml up -d ottergate >/dev/null 2>&1 || true
                 fi
             fi
         fi
@@ -290,12 +290,12 @@ case "$COMMAND" in
                     fi
                 done
                 if [ "$MATCHED_BLUE" = false ]; then
-                    AGENT="pi"
+                    AGENT="base"
                 fi
             fi
         fi
 
-        AGENT=${AGENT:-pi}
+        AGENT=${AGENT:-base}
         INSTANCE=${INSTANCE:-${AGENT}_session}
         if [ ${#INSTANCE} -eq 1 ]; then
             INSTANCE="${INSTANCE}_"
@@ -573,7 +573,7 @@ case "$COMMAND" in
                 AGENT="$arg"
             fi
         done
-        AGENT=${AGENT:-pi}
+        AGENT=${AGENT:-base}
         if [ ! -d "agents/blueprints/$AGENT" ]; then
             echo -e "error: blueprint '${AGENT}' does not exist"
             exit 1
