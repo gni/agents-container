@@ -1,18 +1,18 @@
 services:
-  isolation-dind:
+  ac-dind:
     build:
       context: .
       dockerfile: docker/host/Dockerfile.dind
-    container_name: isolation-dind-host
+    container_name: ac-dind-host
     runtime: runc  # Force standard container runtime instead of host's default
     privileged: true  # Required for Docker-in-Docker to run, create bridge interfaces, and mount cgroups
     ports:
       # Map ports from the inner Docker network to the host machine
-      - "8080:8080/tcp"  # Control Plane bind
-      - "8053:53/udp"    # DNS UDP bind
-      - "8053:53/tcp"    # DNS TCP bind
-      - "8081:80/tcp"    # HTTP proxy bind
-      - "8443:443/tcp"   # SNI proxy bind
+      - "127.0.0.1:8080:8080/tcp"  # Control Plane bind
+      - "127.0.0.1:8053:53/udp"    # DNS UDP bind
+      - "127.0.0.1:8053:53/tcp"    # DNS TCP bind
+      - "127.0.0.1:8081:80/tcp"    # HTTP proxy bind
+      - "127.0.0.1:8443:443/tcp"   # SNI proxy bind
     volumes:
       # Persist inner Docker images, containers, and layers for fast subsequent startup
       - dind-storage:/var/lib/docker

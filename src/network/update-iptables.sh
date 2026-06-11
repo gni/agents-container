@@ -8,7 +8,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
     exit 1
 fi
 
-echo "[update-iptables] Rebuilding iptables sandbox isolation rules..."
+echo "[update-iptables] Rebuilding iptables sandbox ac rules..."
 
 # 1. Create chains if they don't exist
 iptables -N ISOLATION-FW 2>/dev/null || true
@@ -38,7 +38,7 @@ if ! iptables -t nat -C PREROUTING -j ISOLATION-NAT 2>/dev/null; then
 fi
 
 # Get all IPs of the Ottergate proxy container
-OTTERGATE_IPS=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' isolation-ottergate-1 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | tr '\n' ' ')
+OTTERGATE_IPS=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' ac-ottergate-1 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | tr '\n' ' ')
 if [ -z "$OTTERGATE_IPS" ]; then
     OTTERGATE_IPS="172.20.0.53"
 fi

@@ -85,14 +85,14 @@ setup-instance:
 	@chmod 400 $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets/*.txt
 
 dind-start:
-	@if ! docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$$"; then \
+	@if ! docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$$"; then \
 		echo "starting host daemon..."; \
 		docker compose up -d; \
 	fi
 	@echo "waiting for nested docker daemon..."
-	@until docker exec isolation-dind-host docker info >/dev/null 2>&1; do sleep 1; done
+	@until docker exec ac-dind-host docker info >/dev/null 2>&1; do sleep 1; done
 	@echo "waiting for proxy..."
-	@until docker exec isolation-dind-host docker inspect -f '{{.State.Health.Status}}' isolation-ottergate-1 2>/dev/null | grep -q "healthy"; do sleep 1; done
+	@until docker exec ac-dind-host docker inspect -f '{{.State.Health.Status}}' ac-ottergate-1 2>/dev/null | grep -q "healthy"; do sleep 1; done
 	@echo "mesh network is online."
 
 run: setup-global setup-agent setup-instance dind-start
@@ -125,8 +125,8 @@ run: setup-global setup-agent setup-instance dind-start
 		-e BASE_IMAGE="$$BASE_IMAGE" \
 		-e BASE_IMAGE_TAG="$$BASE_IMAGE_TAG" \
 		-e INSTANCES_DIR \
-		isolation-dind-host \
-		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --rm agent $$RUN_CMD
+		ac-dind-host \
+		docker compose -p ac -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --rm agent $$RUN_CMD
  
 shell: setup-global setup-agent setup-instance dind-start
 	@echo "starting interactive shell..."
@@ -158,27 +158,27 @@ shell: setup-global setup-agent setup-instance dind-start
 		-e BASE_IMAGE="$$BASE_IMAGE" \
 		-e BASE_IMAGE_TAG="$$BASE_IMAGE_TAG" \
 		-e INSTANCES_DIR \
-		isolation-dind-host \
-		docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --entrypoint "$$ENTRYPOINT_SHELL" --rm agent
+		ac-dind-host \
+		docker compose -p ac -f /app/docker/docker-compose.inner.yml --env-file /app/$(INSTANCES_DIR)/$(INSTANCE_NAME)/.env run --no-deps --name $(INSTANCE_NAME) --entrypoint "$$ENTRYPOINT_SHELL" --rm agent
 
 
 clean-instance:
 	@echo "cleaning credentials for $(INSTANCE_NAME)..."
-	@container_ids=$$(docker exec isolation-dind-host docker ps -aq --filter label=isolation.instance=$(INSTANCE_NAME) 2>/dev/null); \
+	@container_ids=$$(docker exec ac-dind-host docker ps -aq --filter label=ac.instance=$(INSTANCE_NAME) 2>/dev/null); \
 	if [ -n "$$container_ids" ]; then \
-		docker exec isolation-dind-host docker rm -f $$container_ids 2>/dev/null || true; \
+		docker exec ac-dind-host docker rm -f $$container_ids 2>/dev/null || true; \
 	fi
-	@docker exec isolation-dind-host docker rm -f $(INSTANCE_NAME) 2>/dev/null || true
+	@docker exec ac-dind-host docker rm -f $(INSTANCE_NAME) 2>/dev/null || true
 	@rm -rf $(INSTANCES_DIR)/$(INSTANCE_NAME)/.secrets
 clean-all:
 	@echo "cleaning all credentials..."
-	@docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
+	@docker exec ac-dind-host docker compose -p ac -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
 	docker compose down -v 2>/dev/null || true
 	rm -rf $(INSTANCES_DIR)/*/.secrets 2>/dev/null || true
 	rm -f $(INSTANCES_DIR)/*/.env 2>/dev/null || true
 
 destroy-all:
 	@echo "destroying all workspaces and containers..."
-	@docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
+	@docker exec ac-dind-host docker compose -p ac -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
 	docker compose down -v 2>/dev/null || true
 	rm -rf $(INSTANCES_DIR)/*

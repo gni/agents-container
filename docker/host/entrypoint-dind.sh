@@ -137,9 +137,9 @@ else
 fi
 
 echo "dind: starting ottergate proxy..."
-docker compose -p isolation -f /app/docker/docker-compose.inner.yml up -d ottergate
+docker compose -p ac -f /app/docker/docker-compose.inner.yml up -d ottergate
 
-# Enforce network-level isolation and IP blocklists using iptables
+# Enforce network-level ac and IP blocklists using iptables
 chmod +x /app/src/network/update-iptables.sh
 /bin/bash /app/src/network/update-iptables.sh
 

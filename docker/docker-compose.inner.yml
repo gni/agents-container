@@ -49,7 +49,7 @@ services:
     image: otter_local/agent-${AGENT_TYPE}-agent:${BASE_IMAGE_TAG:-latest}
     hostname: ${INSTANCE_NAME}
     labels:
-      - "isolation.instance=${INSTANCE_NAME}"
+      - "ac.instance=${INSTANCE_NAME}"
     runtime: runsc
     cap_add:
       - SYS_PTRACE

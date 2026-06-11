@@ -28,7 +28,7 @@ COPY --from=build /app/ottergate ./ottergate
 # - 8080/tcp: Control Plane TCP bind
 EXPOSE 53/udp 53/tcp 80/tcp 443/tcp 853/tcp 8080/tcp
 
-# Run as a non-privileged system user for robust process isolation
+# Run as a non-privileged system user for robust process ac
 RUN addgroup -S ottergate && adduser -S ottergate -G ottergate
 USER ottergate
 

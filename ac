@@ -68,11 +68,11 @@ show_usage() {
 
 # Ensure DinD is running and healthy
 ensure_dind_healthy() {
-    if ! docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+    if ! docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
         echo -e "starting host daemon..."
         docker compose up -d
     fi
-    until docker exec isolation-dind-host docker info >/dev/null 2>&1; do
+    until docker exec ac-dind-host docker info >/dev/null 2>&1; do
         sleep 1
     done
     # Give namespaces and cgroups a brief moment to stabilize
@@ -89,13 +89,13 @@ ensure_dind_healthy() {
     
     while true; do
         if [ $((count % 4)) -eq 0 ]; then
-            healthy=$(docker exec isolation-dind-host docker inspect -f '{{.State.Health.Status}}' isolation-ottergate-1 2>&1 || echo "not_created")
+            healthy=$(docker exec ac-dind-host docker inspect -f '{{.State.Health.Status}}' ac-ottergate-1 2>&1 || echo "not_created")
             if [ "$healthy" = "healthy" ]; then
                 break
             fi
             
             local logs
-            logs=$(docker logs isolation-dind-host 2>&1 || echo "")
+            logs=$(docker logs ac-dind-host 2>&1 || echo "")
             
             if echo "$logs" | grep -q "pre-building base image (otter_local/agent-base)"; then
                 phase="building base agent image (takes up to a minute)..."
@@ -110,9 +110,9 @@ ensure_dind_healthy() {
                 phase="verifying proxy..."
             fi
             
-            if docker exec isolation-dind-host test -f /var/run/bootstrap_complete >/dev/null 2>&1; then
+            if docker exec ac-dind-host test -f /var/run/bootstrap_complete >/dev/null 2>&1; then
                 if [ "$healthy" = "failed" ] || [ "$healthy" = "unhealthy" ] || [ "$healthy" = "exited" ] || [ "$healthy" = "not_created" ]; then
-                    docker exec -e AGENT_TYPE="${AGENT_TYPE:-pi}" -e INSTANCE_NAME="${INSTANCE_NAME:-pi_session}" isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml up -d ottergate >/dev/null 2>&1 || true
+                    docker exec -e AGENT_TYPE="${AGENT_TYPE:-pi}" -e INSTANCE_NAME="${INSTANCE_NAME:-pi_session}" ac-dind-host docker compose -p ac -f /app/docker/docker-compose.inner.yml up -d ottergate >/dev/null 2>&1 || true
                 fi
             fi
         fi
@@ -211,15 +211,15 @@ case "$COMMAND" in
         ;;
     status)
         echo -e "host container status:"
-        docker ps -f name=isolation-dind-host
+        docker ps -f name=ac-dind-host
         echo -e "\nhost container resource usage:"
-        docker stats --no-stream isolation-dind-host
+        docker stats --no-stream ac-dind-host
         
         echo -e "\nnested containers status:"
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec isolation-dind-host docker ps
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            docker exec ac-dind-host docker ps
             echo -e "\nnested containers resource usage:"
-            docker exec isolation-dind-host docker stats --no-stream
+            docker exec ac-dind-host docker stats --no-stream
         else
             echo -e "error: host is not running."
         fi
@@ -348,12 +348,12 @@ case "$COMMAND" in
         SHELL_CMD=""
 
         if [ "$COMMAND" = "shell" ]; then
-            RUNNING_CONTAINER=$(docker exec isolation-dind-host docker ps --filter label=isolation.instance="${INSTANCE}" --filter status=running -q || true)
+            RUNNING_CONTAINER=$(docker exec ac-dind-host docker ps --filter label=ac.instance="${INSTANCE}" --filter status=running -q || true)
             
             if [ -n "$RUNNING_CONTAINER" ]; then
                 CONTAINER_ID=$(echo "$RUNNING_CONTAINER" | head -n 1)
                 echo -e "attaching to running sandbox ${INSTANCE}..."
-                docker exec -it isolation-dind-host docker exec -it -u node "${CONTAINER_ID}" /bin/bash
+                docker exec -it ac-dind-host docker exec -it -u node "${CONTAINER_ID}" /bin/bash
                 exit 0
             fi
             
@@ -363,16 +363,16 @@ case "$COMMAND" in
             echo -e "starting agent..."
         fi
 
-        BASE_EXISTS=$(docker exec isolation-dind-host docker images -q "${BASE_IMAGE}" 2>/dev/null || true)
+        BASE_EXISTS=$(docker exec ac-dind-host docker images -q "${BASE_IMAGE}" 2>/dev/null || true)
         if [ -z "$BASE_EXISTS" ] || [ "$FORCE_BUILD" = true ]; then
             echo -e "building ${BASE_IMAGE} using ${DOCKERFILE_PATH}..."
-            docker exec -it isolation-dind-host docker build -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
+            docker exec -it ac-dind-host docker build -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
         fi
 
-        IMAGE_EXISTS=$(docker exec isolation-dind-host docker images -q "otter_local/agent-${AGENT}-agent:${BASE_IMAGE_TAG}" 2>/dev/null || true)
+        IMAGE_EXISTS=$(docker exec ac-dind-host docker images -q "otter_local/agent-${AGENT}-agent:${BASE_IMAGE_TAG}" 2>/dev/null || true)
         if [ -z "$IMAGE_EXISTS" ] || [ "$FORCE_BUILD" = true ]; then
             echo -e "building agent image..."
-            docker exec -it isolation-dind-host docker build -t otter_local/agent-${AGENT}-agent:${BASE_IMAGE_TAG} -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
+            docker exec -it ac-dind-host docker build -t otter_local/agent-${AGENT}-agent:${BASE_IMAGE_TAG} -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
         else
             echo -e "reusing cached agent image (use --build to rebuild)"
         fi
@@ -393,18 +393,18 @@ case "$COMMAND" in
             -e AGENT_CPUS="${CPUS_LIMIT:-0}" \
             -e AGENT_MEMORY="${MEMORY_LIMIT:-0}" \
             -e INSTANCES_DIR \
-            isolation-dind-host \
-            docker compose -p isolation -f /app/docker/docker-compose.inner.yml --env-file /app/"$INSTANCES_DIR"/"$INSTANCE"/.env run $ENTRYPOINT_OPT --no-deps --name ${INSTANCE_NAME} --rm agent $SHELL_CMD
+            ac-dind-host \
+            docker compose -p ac -f /app/docker/docker-compose.inner.yml --env-file /app/"$INSTANCES_DIR"/"$INSTANCE"/.env run $ENTRYPOINT_OPT --no-deps --name ${INSTANCE_NAME} --rm agent $SHELL_CMD
         ;;
     logs)
         LAYER=$1
         shift || true
         case "$LAYER" in
             host)
-                docker logs "$@" isolation-dind-host
+                docker logs "$@" ac-dind-host
                 ;;
             proxy)
-                docker exec -it isolation-dind-host docker logs "$@" isolation-ottergate-1
+                docker exec -it ac-dind-host docker logs "$@" ac-ottergate-1
                 ;;
             agent)
                 INST=$1
@@ -417,16 +417,16 @@ case "$COMMAND" in
                 if [ ${#INST} -eq 1 ]; then
                     INST="${INST}_"
                 fi
-                docker exec -it isolation-dind-host docker logs "$@" "$INST"
+                docker exec -it ac-dind-host docker logs "$@" "$INST"
                 ;;
             gvisor)
                 echo -e "gvisor sandbox logs:"
-                if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-                    LOG_FILES=$(docker exec isolation-dind-host sh -c 'find /var/log/runsc/ /var/log/gvisor/ -name "runsc.log.*" 2>/dev/null' || true)
+                if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+                    LOG_FILES=$(docker exec ac-dind-host sh -c 'find /var/log/runsc/ /var/log/gvisor/ -name "runsc.log.*" 2>/dev/null' || true)
                     if [ -n "$LOG_FILES" ]; then
-                        LATEST_LOG=$(docker exec isolation-dind-host sh -c 'ls -t $(find /var/log/runsc/ /var/log/gvisor/ -name "runsc.log.*" 2>/dev/null) 2>/dev/null | head -n 1')
+                        LATEST_LOG=$(docker exec ac-dind-host sh -c 'ls -t $(find /var/log/runsc/ /var/log/gvisor/ -name "runsc.log.*" 2>/dev/null) 2>/dev/null | head -n 1')
                         echo -e "latest log file: $LATEST_LOG\n"
-                        docker exec -it isolation-dind-host tail -n 100 "$LATEST_LOG"
+                        docker exec -it ac-dind-host tail -n 100 "$LATEST_LOG"
                     else
                         echo "no active gvisor logs found. enable GVISOR_DEBUG=true to generate logs."
                     fi
@@ -442,8 +442,8 @@ case "$COMMAND" in
         ;;
     list)
         echo -e "running sandboxes:"
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            ps_out=$(docker exec isolation-dind-host docker ps --filter label=isolation.instance --format '{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Label "isolation.instance"}}' 2>/dev/null || true)
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            ps_out=$(docker exec ac-dind-host docker ps --filter label=ac.instance --format '{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Label "ac.instance"}}' 2>/dev/null || true)
             
             printf "  \033[1;30m%-36s %-20s %-32s\033[0m\n" "name" "status" "image"
             printf "  \033[1;30m----------------------------------------------------------------------------------------\033[0m\n"
@@ -511,12 +511,12 @@ case "$COMMAND" in
             INST="${INST}_"
         fi
         echo -e "cleaning credentials for $INST..."
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            container_ids=$(docker exec isolation-dind-host docker ps -aq --filter label=isolation.instance="$INST" 2>/dev/null)
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            container_ids=$(docker exec ac-dind-host docker ps -aq --filter label=ac.instance="$INST" 2>/dev/null)
             if [ -n "$container_ids" ]; then
-                docker exec isolation-dind-host docker rm -f $container_ids 2>/dev/null || true
+                docker exec ac-dind-host docker rm -f $container_ids 2>/dev/null || true
             fi
-            docker exec isolation-dind-host docker rm -f "$INST" 2>/dev/null || true
+            docker exec ac-dind-host docker rm -f "$INST" 2>/dev/null || true
         fi
         rm -rf "$INSTANCES_DIR"/"$INST"/.secrets
         rm -f "$INSTANCES_DIR"/"$INST"/.env
@@ -532,20 +532,20 @@ case "$COMMAND" in
             INST="${INST}_"
         fi
         echo -e "destroying $INST (this will delete workspace files)..."
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            container_ids=$(docker exec isolation-dind-host docker ps -aq --filter label=isolation.instance="$INST" 2>/dev/null)
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            container_ids=$(docker exec ac-dind-host docker ps -aq --filter label=ac.instance="$INST" 2>/dev/null)
             if [ -n "$container_ids" ]; then
-                docker exec isolation-dind-host docker rm -f $container_ids 2>/dev/null || true
+                docker exec ac-dind-host docker rm -f $container_ids 2>/dev/null || true
             fi
-            docker exec isolation-dind-host docker rm -f "$INST" 2>/dev/null || true
+            docker exec ac-dind-host docker rm -f "$INST" 2>/dev/null || true
         fi
         rm -rf "$INSTANCES_DIR"/"$INST"
         echo -e "destroyed."
         ;;
     clean-all)
         echo -e "cleaning all credentials..."
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            docker exec ac-dind-host docker compose -p ac -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
         fi
         rm -rf "$INSTANCES_DIR"/*/.secrets
         rm -f "$INSTANCES_DIR"/*/.env
@@ -553,8 +553,8 @@ case "$COMMAND" in
         ;;
     destroy-all)
         echo -e "destroying all containers, volumes, and workspaces..."
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            docker exec ac-dind-host docker compose -p ac -f /app/docker/docker-compose.inner.yml down -v 2>/dev/null || true
         fi
         docker compose down -v 2>/dev/null || true
         rm -rf "$INSTANCES_DIR"/*
@@ -582,22 +582,22 @@ case "$COMMAND" in
         get_base_image_config "${AGENT}_session"
         ensure_dind_healthy
         
-        BASE_EXISTS=$(docker exec isolation-dind-host docker images -q "${BASE_IMAGE}" 2>/dev/null || true)
+        BASE_EXISTS=$(docker exec ac-dind-host docker images -q "${BASE_IMAGE}" 2>/dev/null || true)
         if [ -z "$BASE_EXISTS" ] || [ "$FORCE_BASE" = true ]; then
             echo -e "building ${BASE_IMAGE} using ${DOCKERFILE_PATH}..."
-            docker exec -it isolation-dind-host docker build $NO_CACHE_OPT -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
+            docker exec -it ac-dind-host docker build $NO_CACHE_OPT -t "${BASE_IMAGE}" -f "/app/docker/agent/${DOCKERFILE_PATH}" /app
         else
             echo -e "reusing cached ${BASE_IMAGE} (use --base to rebuild)"
         fi
         
         echo -e "building agent blueprint '${AGENT}'..."
-        docker exec -it isolation-dind-host docker build $NO_CACHE_OPT -t otter_local/agent-${AGENT}-agent:${BASE_IMAGE_TAG} -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
+        docker exec -it ac-dind-host docker build $NO_CACHE_OPT -t otter_local/agent-${AGENT}-agent:${BASE_IMAGE_TAG} -f /app/docker/agent/Dockerfile.agent --build-arg AGENT_TYPE=${AGENT} --build-arg BASE_IMAGE=${BASE_IMAGE} /app
         echo -e "built agent blueprint: ${AGENT}"
         ;;
     stats)
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
             echo -e "streaming nested container stats (press ctrl+c to exit)..."
-            docker exec -it isolation-dind-host docker stats
+            docker exec -it ac-dind-host docker stats
         else
             echo -e "error: host is not running. run './ac start' first."
         fi
@@ -606,40 +606,40 @@ case "$COMMAND" in
         echo -e "\033[1;30m--- Host Storage Usage ---\033[0m"
         df -h . | grep -v Filesystem || true
         echo -e "\n\033[1;30m--- Inner Docker Storage Usage ---\033[0m"
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec isolation-dind-host df -h /var/lib/docker | grep -v Filesystem || true
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            docker exec ac-dind-host df -h /var/lib/docker | grep -v Filesystem || true
             echo -e "\n\033[1;30m--- Inner Docker System df ---\033[0m"
-            docker exec isolation-dind-host docker system df || true
+            docker exec ac-dind-host docker system df || true
             echo -e "\n\033[1;30m--- Persistent Workspaces Disk Usage ---\033[0m"
-            docker exec isolation-dind-host sh -c "du -sh /app/${INSTANCES_DIR:-instances}/* 2>/dev/null" || echo "no persistent workspaces found."
+            docker exec ac-dind-host sh -c "du -sh /app/${INSTANCES_DIR:-instances}/* 2>/dev/null" || echo "no persistent workspaces found."
             echo -e "\n\033[1;30m--- gVisor Logs Disk Usage ---\033[0m"
-            docker exec isolation-dind-host du -sh /var/log/gvisor 2>/dev/null || true
+            docker exec ac-dind-host du -sh /var/log/gvisor 2>/dev/null || true
             echo -e "\n\033[1;30m--- Container Writable Layer Sizes ---\033[0m"
-            docker exec isolation-dind-host docker ps -s --format "table {{.Names}}\t{{.Size}}" || true
+            docker exec ac-dind-host docker ps -s --format "table {{.Names}}\t{{.Size}}" || true
         else
             echo -e "error: host is not running. run './ac start' first."
         fi
         ;;
     btop)
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec -it isolation-dind-host btop --force-utf "$@"
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            docker exec -it ac-dind-host btop --force-utf "$@"
         else
             echo -e "error: host is not running. run './ac start' first."
         fi
         ;;
     ctop)
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec -it isolation-dind-host ctop "$@"
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            docker exec -it ac-dind-host ctop "$@"
         else
             echo -e "error: host is not running. run './ac start' first."
         fi
         ;;
     restart)
         echo -e "restarting proxy..."
-        if docker ps --format '{{.Names}}' | grep -q "^isolation-dind-host$"; then
-            docker exec isolation-dind-host docker compose -p isolation -f /app/docker/docker-compose.inner.yml restart ottergate
-            docker exec isolation-dind-host chmod +x /app/src/network/update-iptables.sh
-            docker exec isolation-dind-host /bin/bash /app/src/network/update-iptables.sh
+        if docker ps --format '{{.Names}}' | grep -q "^ac-dind-host$"; then
+            docker exec ac-dind-host docker compose -p ac -f /app/docker/docker-compose.inner.yml restart ottergate
+            docker exec ac-dind-host chmod +x /app/src/network/update-iptables.sh
+            docker exec ac-dind-host /bin/bash /app/src/network/update-iptables.sh
             echo -e "proxy restarted successfully."
         else
             echo -e "error: host is not running. run './ac start' first."
