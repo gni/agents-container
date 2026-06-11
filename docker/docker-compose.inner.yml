@@ -24,6 +24,14 @@ services:
       - OTTERGATE_STREAM_CONTAINER_LOGS=${OTTERGATE_STREAM_CONTAINER_LOGS:-false}
       - OTTERGATE_STREAM_GVISOR_LOGS=${OTTERGATE_STREAM_GVISOR_LOGS:-false}
       - OTTERGATE_LOG_CONTAINER_STDOUT=${OTTERGATE_LOG_CONTAINER_STDOUT:-true}
+      - http_proxy
+      - https_proxy
+      - ftp_proxy
+      - no_proxy
+      - HTTP_PROXY
+      - HTTPS_PROXY
+      - FTP_PROXY
+      - NO_PROXY
     healthcheck:
       test: ["CMD-SHELL", "http_proxy='' https_proxy='' HTTP_PROXY='' HTTPS_PROXY='' wget -q --spider --tries=1 -T 2 http://127.0.0.1:8080/healthz"]
       interval: 2s
@@ -75,6 +83,14 @@ services:
       - GIT_COMMITTER_EMAIL=${GIT_EMAIL}
       - MESH_PROXY_IP=172.20.0.53
       - TERM=${TERM:-xterm-256color}
+      - http_proxy=
+      - https_proxy=
+      - ftp_proxy=
+      - no_proxy=
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - FTP_PROXY=
+      - NO_PROXY=
 
     secrets:
       - source: github_token

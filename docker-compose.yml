@@ -25,6 +25,14 @@ services:
       - OTTERGATE_STREAM_GVISOR_LOGS=${OTTERGATE_STREAM_GVISOR_LOGS:-true}
       - OTTERGATE_LOG_CONTAINER_STDOUT=${OTTERGATE_LOG_CONTAINER_STDOUT:-false}
       - INSTANCES_DIR=${INSTANCES_DIR:-instances}
+      - http_proxy
+      - https_proxy
+      - ftp_proxy
+      - no_proxy
+      - HTTP_PROXY
+      - HTTPS_PROXY
+      - FTP_PROXY
+      - NO_PROXY
     restart: unless-stopped
 
 volumes:
