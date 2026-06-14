@@ -8,7 +8,7 @@ services:
     privileged: true  # Required for Docker-in-Docker to run, create bridge interfaces, and mount cgroups
     ports:
       # Map ports from the inner Docker network to the host machine
-      - "127.0.0.1:8080:8080/tcp"  # Control Plane bind
+      - "8080:8080/tcp"  # Control Plane bind
       - "127.0.0.1:8053:53/udp"    # DNS UDP bind
       - "127.0.0.1:8053:53/tcp"    # DNS TCP bind
       - "127.0.0.1:8081:80/tcp"    # HTTP proxy bind
