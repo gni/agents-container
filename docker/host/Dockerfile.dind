@@ -1,7 +1,7 @@
 FROM docker:29-dind
 
 # Install runtime dependencies (including bash, crun, iptables, etc.)
-RUN apk add --no-cache bash curl crun libcap xz python3 nodejs openssl ctop
+RUN apk add --no-cache bash curl crun libcap xz python3 nodejs openssl ctop zstd tar
 
 # Force legacy iptables to prevent nftables initialization errors in nested containers
 RUN ln -sf /sbin/iptables-legacy /sbin/iptables && \
@@ -12,10 +12,14 @@ RUN ln -sf /sbin/iptables-legacy /sbin/iptables && \
     ln -sf /sbin/ip6tables-legacy-restore /sbin/ip6tables-restore
 
 # Download and install latest gVisor (runsc) and containerd-shim-runsc-v1 binaries for x86_64
-RUN wget https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc && \
-    wget https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/containerd-shim-runsc-v1 && \
-    chmod a+rx runsc containerd-shim-runsc-v1 && \
-    mv runsc containerd-shim-runsc-v1 /usr/local/bin/
+RUN set -e && \
+    ARCH=$(uname -m) && \
+    URL="https://storage.googleapis.com/gvisor/releases/release/latest/${ARCH}" && \
+    wget "${URL}/gvisor.tar.zstd" "${URL}/gvisor.tar.zstd.sha512" && \
+    sha512sum -c gvisor.tar.zstd.sha512 && \
+    tar --zstd -xf gvisor.tar.zstd -C /usr/local/bin && \
+    chmod -R a+rx /usr/local/bin/runsc /usr/local/bin/containerd-shim-runsc-v1 /usr/local/bin/gvisor-bin && \
+    rm -f gvisor.tar.zstd gvisor.tar.zstd.sha512
 
 # Copy Docker daemon configuration supporting gVisor (runsc) and crun
 COPY docker/host/daemon.json /etc/docker/daemon.json
